@@ -1,0 +1,18 @@
+{
+  "default_warehouses": {
+    "warehouse_names": [
+      "Тула",
+      "Белые Столбы",
+      "Домодедово"
+    ],
+    "weights": [
+      0.35,
+      0.25,
+      0.15
+    ],
+    "timestamp": 1761136149.0694706,
+    "source": "warehouse_api",
+    "total_products": 1,
+    "api_success_rate": 1.0
+  }
+}
