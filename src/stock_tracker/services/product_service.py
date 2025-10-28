@@ -20,6 +20,8 @@ from stock_tracker.core.validator import DataValidator
 from stock_tracker.core.calculator import TurnoverCalculator, WarehouseAggregator, is_real_warehouse, validate_warehouse_name
 from stock_tracker.database.operations import SheetsOperations
 from stock_tracker.database.sheets import GoogleSheetsClient
+from stock_tracker.services.warehouse_classifier import WarehouseClassifier, create_warehouse_classifier
+from stock_tracker.services.dual_api_stock_fetcher import DualAPIStockFetcher
 from stock_tracker.utils.config import get_config
 from stock_tracker.utils.logger import get_logger
 from stock_tracker.utils.exceptions import SyncError, ValidationError, APIError
@@ -27,7 +29,7 @@ from stock_tracker.utils.exceptions import SyncError, ValidationError, APIError
 
 # Module constants
 ORDER_LOOKBACK_DAYS = 7  # How many days to look back for orders data
-WAREHOUSE_TASK_WAIT_SECONDS = 20  # Wait time for WB API task processing
+WAREHOUSE_TASK_WAIT_SECONDS = 60  # Wait time for WB API task processing (increased from 20s)
 
 logger = get_logger(__name__)
 
@@ -59,7 +61,13 @@ class ProductService:
         self.calculator = TurnoverCalculator()
         self.aggregator = WarehouseAggregator()
         
-        logger.info("ProductService initialized")
+        # Initialize warehouse classifier (will be built on first use)
+        self.warehouse_classifier: Optional[WarehouseClassifier] = None
+        
+        # Initialize dual-API stock fetcher for FBO+FBS stocks
+        self.dual_api_fetcher = DualAPIStockFetcher(self.config.wildberries_api_key)
+        
+        logger.info("ProductService initialized with Dual API support (FBO+FBS)")
     
     # Product CRUD with business logic
     
@@ -246,12 +254,16 @@ class ProductService:
             logger.error(f"Full synchronization failed: {e}")
             raise SyncError(f"Synchronization failed: {e}")
     
-    async def sync_from_api_to_sheets(self) -> SyncSession:
+    async def sync_from_api_to_sheets(self, skip_existence_check: bool = False) -> SyncSession:
         """
         Fetch fresh data from Wildberries API and write to Google Sheets.
         
         This method gets warehouse remains from WB API and populates/updates
         the Google Sheets with current inventory data.
+        
+        Args:
+            skip_existence_check: Skip existence checks when writing products.
+                                 Set to True when table was just cleared to avoid unnecessary API calls.
         
         Returns:
             SyncSession with results summary
@@ -268,41 +280,110 @@ class ProductService:
             logger.info("Starting API-to-Sheets synchronization")
             sync_session.start()
             
-            # Step 1: Fetch warehouse data from Wildberries API
-            logger.info("Fetching warehouse data from Wildberries API...")
-            task_id = await self.wb_client.create_warehouse_remains_task()
-            logger.info(f"Created API task: {task_id}")
+            # Step 0: Initialize warehouse classifier if not already done
+            if not self.warehouse_classifier:
+                logger.info("Initializing warehouse classifier...")
+                self.warehouse_classifier = await create_warehouse_classifier(
+                    self.wb_client,
+                    days=90,  # Analyze last 90 days of orders
+                    auto_build=True
+                )
+                stats = self.warehouse_classifier.get_mapping_stats()
+                logger.info(f"Warehouse classifier initialized: {stats['total_warehouses']} warehouses " +
+                          f"(FBO: {stats['fbo_warehouses']}, FBS: {stats['fbs_warehouses']})")
             
-            # Wait for task processing (async friendly)
-            logger.info("Waiting for API task to process...")
+            # Step 1: Fetch warehouse remains (stocks) from V1 API
+            logger.info("Fetching warehouse remains (stocks) from V1 API...")
+            task_id = await self.wb_client.create_warehouse_remains_task()
+            logger.info(f"Created warehouse remains task: {task_id}")
+            
+            # Wait for task processing
+            logger.info(f"Waiting {WAREHOUSE_TASK_WAIT_SECONDS}s for task processing...")
             await asyncio.sleep(WAREHOUSE_TASK_WAIT_SECONDS)
             
-            # Download the warehouse results
-            api_data = await self.wb_client.download_warehouse_remains(task_id)
-            logger.info(f"Downloaded {len(api_data)} products from warehouse API")
+            # Download warehouse remains (stocks only!)
+            warehouse_remains = await self.wb_client.download_warehouse_remains(task_id)
+            logger.info(f"Downloaded {len(warehouse_remains)} products from V1 warehouse API")
             
-            # Step 2: Fetch orders data from the last 7 days
-            date_from = (datetime.now() - timedelta(days=ORDER_LOOKBACK_DAYS)).strftime("%Y-%m-%dT%H:%M:%S")
-            logger.info(f"Fetching orders data from {date_from}...")
+            # ИСПРАВЛЕНО 27.10.2025 21:35 - КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ!
+            # V1 API warehouse_remains содержит ТОЛЬКО ОСТАТКИ, НЕ заказы!
+            # Заказы должны быть получены из /supplier/orders эндпоинта согласно urls.md
+            #
+            # Структура V1 API warehouse_remains:
+            # - warehouseName: название склада
+            # - quantity: остатки на складе (НЕ заказы!)
+            # - "В пути до получателей": товары в транзите (НЕ активные заказы!)
+            #
+            # ПРАВИЛЬНО согласно urls.md:
+            # Заказы: Подсчитывается количество записей в /supplier/orders где nmId + warehouseName
             
-            try:
-                orders_data = await self.wb_client.get_supplier_orders(date_from)
-                logger.info(f"Downloaded {len(orders_data)} orders from API")
-                
-                # Debug: Log sample order structure
-                if orders_data:
-                    sample_order = orders_data[0]
-                    logger.debug(f"Sample order structure: {list(sample_order.keys())}")
-                    logger.debug(f"Sample order: nmId={sample_order.get('nmId')}, "
-                               f"supplierArticle={sample_order.get('supplierArticle')}, "
-                               f"warehouseName={sample_order.get('warehouseName')}")
-                else:
-                    logger.warning("No orders data returned from API - orders will be 0")
-                    
-            except Exception as e:
-                logger.error(f"Failed to get orders data: {e}")
-                logger.warning("Using empty orders data - all orders will be 0")
-                orders_data = []
+            # Step 2: Fetch orders from supplier/orders endpoint
+            logger.info("Fetching orders data from supplier/orders endpoint...")
+            from stock_tracker.api.products import WildberriesProductDataFetcher
+            
+            data_fetcher = WildberriesProductDataFetcher(self.wb_client)
+            
+            # Calculate date_from as ORDER_LOOKBACK_DAYS ago
+            date_from = (datetime.now() - timedelta(days=ORDER_LOOKBACK_DAYS)).strftime("%Y-%m-%dT00:00:00")
+            logger.info(f"Using date_from: {date_from} (last {ORDER_LOOKBACK_DAYS} days)")
+            
+            orders_data_raw = await data_fetcher.fetch_supplier_orders(date_from, flag=0)
+            logger.info(f"Downloaded {len(orders_data_raw)} orders from supplier/orders API")
+            
+            # ИСПРАВЛЕНИЕ 28.10.2025: Фильтровать отменённые заказы
+            valid_orders = [
+                order for order in orders_data_raw 
+                if not order.get('isCancel', False)
+            ]
+            logger.info(f"Active orders (excluding cancelled): {len(valid_orders)} " +
+                       f"(removed {len(orders_data_raw) - len(valid_orders)} cancelled)")
+            
+            # ИСПРАВЛЕНИЕ 28.10.2025: Дедуплицировать по srid
+            unique_orders = {}
+            for order in valid_orders:
+                srid = order.get('srid')
+                if srid and srid not in unique_orders:
+                    unique_orders[srid] = order
+            
+            logger.info(f"Unique orders (by srid): {len(unique_orders)} " +
+                       f"(removed {len(valid_orders) - len(unique_orders)} duplicates)")
+            
+            # Преобразовать обратно в список для дальнейшей обработки
+            orders_data = list(unique_orders.values())
+            logger.info(f"Final orders_data count: {len(orders_data)}")
+            
+            # ДОБАВЛЕНО 28.10.2025: Детальная статистика обработки заказов
+            logger.info("=" * 60)
+            logger.info("📊 СТАТИСТИКА ОБРАБОТКИ ЗАКАЗОВ:")
+            logger.info(f"   Total raw orders from API:      {len(orders_data_raw)}")
+            logger.info(f"   After filtering cancelled:      {len(valid_orders)} (-{len(orders_data_raw)-len(valid_orders)})")
+            logger.info(f"   After deduplication (srid):     {len(unique_orders)} (-{len(valid_orders)-len(unique_orders)})")
+            logger.info(f"   Final orders_data count:        {len(orders_data)}")
+            
+            # Статистика по складам в заказах
+            warehouse_stats = {}
+            for order in orders_data:
+                wh = order.get("warehouseName", "Неизвестно")
+                warehouse_stats[wh] = warehouse_stats.get(wh, 0) + 1
+            
+            logger.info(f"   Unique warehouses in orders:    {len(warehouse_stats)}")
+            top_warehouses = sorted(warehouse_stats.items(), key=lambda x: -x[1])[:5]
+            for wh_name, count in top_warehouses:
+                logger.info(f"      {wh_name:<35} {count:>3} заказов")
+            logger.info("=" * 60)
+            
+            api_data = warehouse_remains
+            
+            # Debug: Log sample API data structure
+            if api_data:
+                sample_item = api_data[0]
+                logger.debug(f"Sample warehouse item structure: {list(sample_item.keys())}")
+                logger.debug(f"Sample item: nmId={sample_item.get('nmId')}, "
+                           f"vendorCode={sample_item.get('vendorCode')}, "
+                           f"ordersCount={sample_item.get('ordersCount')}, "
+                           f"stockCount={sample_item.get('stockCount')}")
+            else:
+                logger.warning("No warehouse data returned from API")
             
             if not api_data:
                 logger.info("No products returned from warehouse API")
@@ -321,9 +402,11 @@ class ProductService:
                     product = self._convert_api_record_to_product(api_record, orders_data)
                     
                     # Write/update in Google Sheets
+                    # Use skip_existence_check if table was cleared before sync
                     success = self.operations.create_or_update_product(
                         self.config.google_sheets.sheet_id,
-                        product
+                        product,
+                        skip_existence_check=skip_existence_check
                     )
                     
                     if success:
@@ -353,6 +436,299 @@ class ProductService:
             sync_session.fail(f"API-to-Sheets sync failed: {e}")
             logger.error(f"API-to-Sheets sync failed: {e}")
             raise SyncError(f"API-to-Sheets sync failed: {e}")
+    
+    async def sync_from_dual_api_to_sheets(self, skip_existence_check: bool = False) -> SyncSession:
+        """
+        Fetch fresh data from Wildberries using Dual API (FBO+FBS) and write to Google Sheets.
+        
+        This method combines:
+        - Statistics API for FBO (Fulfillment by Operator) stocks
+        - Marketplace API v3 for FBS (Fulfillment by Seller) stocks  
+        - Supplier Orders API for active orders count
+        
+        Args:
+            skip_existence_check: Skip existence checks when writing products.
+                                 Set to True when table was just cleared to avoid unnecessary API calls.
+        
+        Returns:
+            SyncSession with results summary
+            
+        Raises:
+            SyncError: If synchronization fails
+        """
+        sync_session = SyncSession(
+            session_id=str(uuid.uuid4()),
+            start_time=datetime.now()
+        )
+        
+        try:
+            logger.info("="*80)
+            logger.info("🚀 Starting Dual API Synchronization (FBO+FBS)")
+            logger.info("="*80)
+            sync_session.start()
+            
+            # Step 1: Get combined FBO+FBS stocks using Dual API
+            logger.info("\n📊 Step 1: Fetching stocks from Dual API (Statistics + Marketplace)...")
+            
+            stocks_by_article = self.dual_api_fetcher.get_combined_stocks_by_article()
+            
+            logger.info(f"✅ Retrieved stocks for {len(stocks_by_article)} articles")
+            
+            # Log summary
+            summary = self.dual_api_fetcher.get_all_stocks_summary()
+            logger.info(f"\n📈 Stocks Summary:")
+            logger.info(f"   FBO (WB warehouses):    {summary['total_fbo']:>6} шт")
+            logger.info(f"   FBS (Seller warehouses): {summary['total_fbs']:>6} шт")
+            logger.info(f"   ─────────────────────────────────")
+            logger.info(f"   TOTAL:                   {summary['total']:>6} шт")
+            logger.info(f"   Articles:                {summary['articles_count']}")
+            logger.info(f"   FBS warehouses:          {summary['fbs_warehouses_count']}")
+            
+            if not stocks_by_article:
+                logger.info("⚠️ No products returned from Dual API")
+                sync_session.complete()
+                return sync_session
+            
+            # Step 2: Fetch orders from supplier/orders endpoint
+            logger.info("\n📦 Step 2: Fetching orders from supplier/orders API...")
+            
+            from stock_tracker.api.products import WildberriesProductDataFetcher
+            data_fetcher = WildberriesProductDataFetcher(self.wb_client)
+            
+            # Calculate date_from as ORDER_LOOKBACK_DAYS ago
+            date_from = (datetime.now() - timedelta(days=ORDER_LOOKBACK_DAYS)).strftime("%Y-%m-%dT00:00:00")
+            logger.info(f"   Date range: {date_from} to now (last {ORDER_LOOKBACK_DAYS} days)")
+            
+            orders_data_raw = await data_fetcher.fetch_supplier_orders(date_from, flag=0)
+            logger.info(f"   Raw orders: {len(orders_data_raw)}")
+            
+            # Filter cancelled orders
+            valid_orders = [
+                order for order in orders_data_raw 
+                if not order.get('isCancel', False)
+            ]
+            logger.info(f"   Active orders: {len(valid_orders)} (removed {len(orders_data_raw) - len(valid_orders)} cancelled)")
+            
+            # Deduplicate by srid
+            unique_orders = {}
+            for order in valid_orders:
+                srid = order.get('srid')
+                if srid and srid not in unique_orders:
+                    unique_orders[srid] = order
+            
+            orders_data = list(unique_orders.values())
+            logger.info(f"   Unique orders: {len(orders_data)} (removed {len(valid_orders) - len(orders_data)} duplicates)")
+            
+            # Count orders by nmId
+            orders_by_nm_id = defaultdict(int)
+            for order in orders_data:
+                nm_id = order.get('nmId')
+                if nm_id:
+                    orders_by_nm_id[nm_id] += 1
+            
+            logger.info(f"   Products with orders: {len(orders_by_nm_id)}")
+            
+            # Step 3: Convert to Product models and write to Sheets
+            logger.info("\n💾 Step 3: Writing products to Google Sheets...")
+            
+            sync_session.products_total = len(stocks_by_article)
+            updated_count = 0
+            error_count = 0
+            
+            for article, stock_data in stocks_by_article.items():
+                try:
+                    nm_id = stock_data['nm_id']
+                    
+                    # Get orders count for this product
+                    orders_count = orders_by_nm_id.get(nm_id, 0)
+                    
+                    # Build warehouse details from FBO and FBS data
+                    warehouses = []
+                    warehouse_stocks = {}  # warehouse_name -> stock
+                    
+                    # Process FBO warehouses (from Statistics API)
+                    for fbo_detail in stock_data.get('fbo_details', []):
+                        wh_name = fbo_detail.get('warehouseName')
+                        qty = fbo_detail.get('quantity', 0)
+                        
+                        if wh_name and qty > 0:
+                            if wh_name not in warehouse_stocks:
+                                warehouse_stocks[wh_name] = 0
+                            warehouse_stocks[wh_name] += qty
+                    
+                    # Process FBS warehouses (from Marketplace API v3)
+                    for fbs_detail in stock_data.get('fbs_details', []):
+                        wh_name = fbs_detail.get('warehouse_name')
+                        qty = fbs_detail.get('amount', 0)
+                        
+                        if wh_name and qty > 0:
+                            if wh_name not in warehouse_stocks:
+                                warehouse_stocks[wh_name] = 0
+                            warehouse_stocks[wh_name] += qty
+                    
+                    # Count orders per warehouse
+                    warehouse_orders = {}
+                    for order in orders_data:
+                        if order.get('nmId') == nm_id:
+                            wh_name = order.get('warehouseName', '').strip()
+                            if wh_name:
+                                warehouse_orders[wh_name] = warehouse_orders.get(wh_name, 0) + 1
+                    
+                    # Create Warehouse objects
+                    for wh_name, stock in warehouse_stocks.items():
+                        warehouse = Warehouse(
+                            name=wh_name,
+                            stock=stock,
+                            orders=warehouse_orders.get(wh_name, 0)
+                        )
+                        warehouses.append(warehouse)
+                    
+                    # Add warehouses with orders but no stock
+                    for wh_name, orders in warehouse_orders.items():
+                        if wh_name not in warehouse_stocks:
+                            warehouse = Warehouse(
+                                name=wh_name,
+                                stock=0,
+                                orders=orders
+                            )
+                            warehouses.append(warehouse)
+                    
+                    # Create Product model with warehouse details
+                    product = Product(
+                        seller_article=article,
+                        wildberries_article=nm_id,
+                        total_stock=stock_data['total_stock'],
+                        total_orders=orders_count,
+                        fbo_stock=stock_data['fbo_stock'],
+                        fbs_stock=stock_data['fbs_stock'],
+                        warehouses=warehouses,
+                        last_updated=datetime.now()
+                    )
+                    
+                    # Calculate turnover if we have stock and orders
+                    if product.total_stock > 0 and product.total_orders > 0:
+                        product.turnover = round(product.total_orders / product.total_stock, 2)
+                    else:
+                        product.turnover = 0.0
+                    
+                    # Write/update in Google Sheets
+                    success = self.operations.create_or_update_product(
+                        self.config.google_sheets.sheet_id,
+                        product,
+                        skip_existence_check=skip_existence_check
+                    )
+                    
+                    if success:
+                        updated_count += 1
+                        sync_session.products_processed += 1
+                        
+                        # Log sample product with warehouse breakdown
+                        if updated_count <= 3:
+                            logger.info(f"   ✅ {article}: FBO={product.fbo_stock}, FBS={product.fbs_stock}, "
+                                      f"Total={product.total_stock}, Orders={product.total_orders}, "
+                                      f"Warehouses={len(product.warehouses)}")
+                            for wh in product.warehouses[:3]:
+                                logger.info(f"       └─ {wh.name}: stock={wh.stock}, orders={wh.orders}")
+                    else:
+                        error_count += 1
+                        sync_session.products_failed += 1
+                        sync_session.add_error(f"Failed to write product {article}")
+                        
+                except Exception as e:
+                    error_count += 1
+                    sync_session.products_failed += 1
+                    sync_session.add_error(f"Error processing {article}: {e}")
+                    logger.warning(f"Failed to process {article}: {e}")
+            
+            # Complete session
+            if error_count == 0:
+                sync_session.complete()
+            else:
+                sync_session.fail(f"Some products failed: {error_count} errors")
+            
+            logger.info("\n" + "="*80)
+            logger.info(f"✅ Dual API Sync Completed:")
+            logger.info(f"   Updated: {updated_count}")
+            logger.info(f"   Errors:  {error_count}")
+            logger.info(f"   Duration: {(datetime.now() - sync_session.start_time).total_seconds():.1f}s")
+            logger.info("="*80)
+            
+            return sync_session
+            
+        except Exception as e:
+            sync_session.fail(f"Dual API sync failed: {e}")
+            logger.error(f"Dual API sync failed: {e}")
+            raise SyncError(f"Dual API sync failed: {e}")
+    
+    def _combine_v1_v2_data(self, warehouse_remains: List[Dict], orders_by_nm_id: Dict[int, int]) -> List[Dict]:
+        """
+        Combine V1 (warehouse remains with stocks) and V2 (total orders) data.
+        
+        V1 API provides: nmId, vendorCode, warehouses[].warehouseName, warehouses[].quantity (stock)
+        V2 API provides: nmID, metrics.ordersCount (total orders)
+        
+        This method distributes total orders proportionally across warehouses based on stock.
+        
+        Args:
+            warehouse_remains: List of records from V1 warehouse_remains API
+            orders_by_nm_id: Dict mapping nmID -> total orders from V2 API
+            
+        Returns:
+            List of combined records with ordersCount added to each warehouse
+        """
+        logger.info(f"Combining V1+V2 data for {len(warehouse_remains)} products")
+        
+        combined_data = []
+        
+        for record in warehouse_remains:
+            nm_id = record.get('nmId')
+            vendor_code = record.get('vendorCode', 'Unknown')
+            warehouses = record.get('warehouses', [])
+            
+            # Get total orders from V2 API
+            total_orders = orders_by_nm_id.get(nm_id, 0)
+            
+            if not warehouses:
+                logger.warning(f"Product {vendor_code} (nmId={nm_id}) has no warehouses")
+                combined_data.append(record)
+                continue
+            
+            # Calculate total stock across all warehouses
+            total_stock = sum(wh.get('quantity', 0) for wh in warehouses)
+            
+            if total_stock == 0:
+                logger.warning(f"Product {vendor_code} (nmId={nm_id}) has 0 total stock")
+                # Can't distribute orders, just set 0 for all warehouses
+                for wh in warehouses:
+                    wh['ordersCount'] = 0
+                combined_data.append(record)
+                continue
+            
+            # Distribute orders proportionally to stock
+            distributed_orders = 0
+            for i, wh in enumerate(warehouses):
+                wh_name = wh.get('warehouseName', 'Unknown')
+                wh_stock = wh.get('quantity', 0)
+                
+                # Calculate proportional orders
+                if i == len(warehouses) - 1:
+                    # Last warehouse gets remaining orders to ensure total matches
+                    wh_orders = total_orders - distributed_orders
+                else:
+                    wh_orders = round(total_orders * wh_stock / total_stock)
+                
+                wh['ordersCount'] = wh_orders
+                distributed_orders += wh_orders
+                
+                logger.debug(f"  Warehouse {wh_name}: stock={wh_stock}, orders={wh_orders} "
+                           f"(proportion: {wh_stock}/{total_stock})")
+            
+            logger.debug(f"Product {vendor_code}: distributed {total_orders} orders across "
+                       f"{len(warehouses)} warehouses (total stock: {total_stock})")
+            
+            combined_data.append(record)
+        
+        return combined_data
     
     def _convert_api_record_to_product(self, api_record: Dict[str, Any], orders_data: List[Dict[str, Any]] = None) -> Product:
         """
@@ -385,89 +761,45 @@ class ProductService:
         # FIXED: Track only real warehouse stock (excluding in-transit items)
         real_warehouse_stock = 0
         
-        # FIXED: Improved matching logic for orders
-        warehouse_orders_map = {}
+        # ИСПРАВЛЕНО 27.10.2025 21:35 - КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ!
+        # V1 API warehouse_remains содержит ТОЛЬКО остатки (quantity), НЕ заказы!
+        # Структура V1 API warehouse_remains:
+        # - Реальные склады (Краснодар, Чехов, etc): quantity = остатки на складе
+        # - "В пути до получателей": quantity = товары в транзите (НЕ заказы!)
+        # - "В пути возвраты на склад WB": quantity = возвраты
+        # - "Всего находится на складах": quantity = сводный остаток
+        #
+        # ЗАКАЗЫ берутся из orders_data (supplier/orders эндпоинт) согласно urls.md!
         
-        if 'warehouses' in api_record and isinstance(api_record['warehouses'], list):
-            # Initialize warehouse order counts
+        if 'warehouses' in api_record and isinstance(api_record['warehouses'], list):            
             for wh in api_record['warehouses']:
                 warehouse_name = wh.get('warehouseName', 'Unknown')
-                # ДОБАВИТЬ ФИЛЬТРАЦИЮ:
-                if warehouse_name and is_real_warehouse(warehouse_name) and validate_warehouse_name(warehouse_name):
-                    warehouse_orders_map[warehouse_name] = 0
-                else:
-                    logger.debug(f"Filtered out warehouse name in product service: {warehouse_name}")
+                warehouse_quantity = wh.get('quantity', 0)
                 
-            # Count orders for this product using BOTH nmId and supplierArticle
-            product_orders = []
-            for order in orders_data:
-                order_nm_id = order.get('nmId')
-                order_supplier_article = order.get('supplierArticle', '')  # Orders use supplierArticle
-                
-                # Match by nmId (primary) AND supplierArticle (secondary validation)
-                if (order_nm_id == nm_id and 
-                    (not vendor_code or order_supplier_article == vendor_code)):
-                    product_orders.append(order)
-            
-            logger.debug(f"Found {len(product_orders)} orders for product {vendor_code} (nmId: {nm_id})")
-            
-            # Group orders by warehouse for this product
-            orders_by_warehouse = defaultdict(int)
-            for order in product_orders:
-                order_warehouse = order.get('warehouseName', '')
-                order_quantity = order.get('quantity', 1)  # FIXED: Use actual quantity, not count
-                # ДОБАВИТЬ ФИЛЬТРАЦИЮ для заказов:
-                if order_warehouse and is_real_warehouse(order_warehouse) and validate_warehouse_name(order_warehouse):
-                    orders_by_warehouse[order_warehouse] += order_quantity
-                else:
-                    logger.debug(f"Filtered out order warehouse name: {order_warehouse}")
-            
-            # FIXED: More intelligent warehouse matching
-            # 1. Direct warehouse name match
-            # 2. Fallback: distribute orders proportionally to stock
-            remaining_orders = dict(orders_by_warehouse)  # Create copy for safe modification
-            
-            for wh in api_record['warehouses']:
-                warehouse_name = wh.get('warehouseName', 'Unknown')
-                warehouse_stock = wh.get('quantity', 0)
-                
-                # ДОБАВИТЬ ФИЛЬТРАЦИЮ при создании складов:
-                if not (warehouse_name and is_real_warehouse(warehouse_name) and validate_warehouse_name(warehouse_name)):
-                    logger.debug(f"Skipping filtered warehouse in product creation: {warehouse_name}")
+                # Фильтруем служебные/виртуальные склады
+                if warehouse_name in ("В пути до получателей", "В пути возвраты на склад WB", 
+                                     "Всего находится на складах"):
+                    logger.debug(f"Skipping service warehouse: {warehouse_name}")
                     continue
                 
-                # Try direct warehouse name match first
-                warehouse_orders = remaining_orders.get(warehouse_name, 0)
-                if warehouse_orders > 0:
-                    # Remove from available orders to prevent double counting
-                    del remaining_orders[warehouse_name]
+                # Проверяем что это реальный склад (не используем validate_warehouse_name)
+                if not warehouse_name or not is_real_warehouse(warehouse_name):
+                    logger.debug(f"Skipping invalid warehouse name: {warehouse_name}")
+                    continue
                 
-                # If no direct match, check for partial matches or related warehouses
-                if warehouse_orders == 0 and remaining_orders:
-                    # Look for partial matches (e.g., "Подольск" matches "Подольск 3")
-                    matched_order_wh = None
-                    for order_wh_name, order_count in remaining_orders.items():
-                        if (warehouse_name.lower() in order_wh_name.lower() or 
-                            order_wh_name.lower() in warehouse_name.lower()):
-                            warehouse_orders = order_count
-                            matched_order_wh = order_wh_name
-                            break
-                    
-                    # Remove matched warehouse from remaining orders
-                    if matched_order_wh:
-                        del remaining_orders[matched_order_wh]
+                # Остатки берем из warehouse_remains
+                warehouse_stock = warehouse_quantity
+                # Заказы будут добавлены из orders_data позже
+                warehouse_orders = 0
+                is_in_transit = False
                 
-                logger.debug(f"Warehouse {warehouse_name}: stock={warehouse_stock}, orders={warehouse_orders}")
+                logger.debug(f"Warehouse {warehouse_name}: stock={warehouse_stock}, orders will be calculated from orders_data")
                 
-                # FIXED: Check if this is a real warehouse or "in transit"
-                is_in_transit = self._is_in_transit_warehouse(warehouse_name)
-                
+                # ИСПРАВЛЕНО 26.10.2025: Убраны несуществующие параметры orders_quantity и stock_quantity
                 warehouse = Warehouse(
                     name=warehouse_name,
                     stock=warehouse_stock,
-                    orders=warehouse_orders,
-                    orders_quantity=wh.get('orders_quantity', 0),
-                    stock_quantity=wh.get('stock_quantity', 0)
+                    orders=warehouse_orders
                 )
                 warehouses.append(warehouse)
                 
@@ -475,67 +807,139 @@ class ProductService:
                 total_quantity += warehouse_stock  # Keep total for compatibility
                 if not is_in_transit:
                     real_warehouse_stock += warehouse_stock
-                
-                total_orders += warehouse_orders
-            
-            # If we still have unmatched orders, distribute them to warehouses with stock
-            total_order_quantity_from_api = sum(order.get('quantity', 1) for order in product_orders)
-            unmatched_orders = sum(remaining_orders.values())  # Use remaining unmatched orders
-            if unmatched_orders > 0 and warehouses:
-                logger.debug(f"Distributing {unmatched_orders} unmatched orders proportionally")
-                
-                # Get warehouses with stock for proportional distribution
-                warehouses_with_stock = [wh for wh in warehouses if wh.stock > 0]
-                if warehouses_with_stock:
-                    total_stock_for_distribution = sum(wh.stock for wh in warehouses_with_stock)
-                    remaining_to_distribute = unmatched_orders
-                    
-                    for warehouse in warehouses_with_stock:
-                        if total_stock_for_distribution > 0:
-                            proportion = warehouse.stock / total_stock_for_distribution
-                            # Use proper rounding instead of int() to ensure all orders are distributed
-                            additional_orders = round(unmatched_orders * proportion)
-                            # Ensure we don't exceed remaining orders
-                            additional_orders = min(additional_orders, remaining_to_distribute)
-                            warehouse.orders += additional_orders
-                            total_orders += additional_orders
-                            remaining_to_distribute -= additional_orders
-                            logger.debug(f"Added {additional_orders} proportional orders to {warehouse.name}")
-                    
-                    # If there are still remaining orders due to rounding, add them to the largest warehouse
-                    if remaining_to_distribute > 0 and warehouses_with_stock:
-                        largest_warehouse = max(warehouses_with_stock, key=lambda w: w.stock)
-                        largest_warehouse.orders += remaining_to_distribute
-                        total_orders += remaining_to_distribute
-                        logger.debug(f"Added {remaining_to_distribute} remaining orders to largest warehouse {largest_warehouse.name}")
-                else:
-                    # Fallback: distribute evenly to all warehouses
-                    orders_per_warehouse = unmatched_orders // len(warehouses)
-                    remainder = unmatched_orders % len(warehouses)
-                    for i, warehouse in enumerate(warehouses):
-                        additional_orders = orders_per_warehouse + (1 if i < remainder else 0)
-                        warehouse.orders += additional_orders
-                        total_orders += additional_orders
         
-        logger.debug(f"Product totals: stock={total_quantity}, orders={total_orders}")
+        # ДОБАВЛЕНО 27.10.2025 21:35 - КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ!
+        # Рассчитываем заказы из orders_data для каждого склада
+        logger.debug(f"Calculating orders for product {vendor_code} (nmId: {nm_id}) from {len(orders_data)} orders")
+        
+        # ИСПРАВЛЕНИЕ 28.10.2025: Добавляем функцию нормализации названий складов
+        def normalize_warehouse_name(name: str) -> str:
+            """
+            Нормализует название склада для корректного сравнения.
+            Примеры:
+            - "Подольск 3" → "Подольск 3"
+            - "Подольск-3" → "Подольск 3"
+            - "Самара (Новосемейкино)" → "Самара Новосемейкино"
+            """
+            if not name:
+                return "Неизвестно"
+            # Убрать скобки
+            name = name.replace('(', '').replace(')', '')
+            # Убрать лишние пробелы
+            name = ' '.join(name.split())
+            return name.strip()
+        
+        for warehouse in warehouses:
+            # Используем calculator для точного подсчета заказов по складу
+            warehouse_orders_count = 0
+            
+            # ИСПРАВЛЕНИЕ 28.10.2025: Нормализуем названия для сравнения
+            normalized_warehouse_name = normalize_warehouse_name(warehouse.name)
+            
+            for order in orders_data:
+                order_nm_id = order.get("nmId")
+                order_warehouse_raw = order.get("warehouseName", "").strip()
+                normalized_order_warehouse = normalize_warehouse_name(order_warehouse_raw)
+                
+                # ИСПРАВЛЕНИЕ 28.10.2025: isCancel уже отфильтрован выше, но оставим проверку для надежности
+                is_canceled = order.get("isCancel", False)
+                
+                # Точное совпадение nmId + нормализованное warehouseName
+                if (order_nm_id == nm_id and 
+                    normalized_order_warehouse == normalized_warehouse_name and 
+                    not is_canceled):
+                    warehouse_orders_count += 1
+            
+            warehouse.orders = warehouse_orders_count
+            total_orders += warehouse_orders_count
+            
+            logger.debug(f"  Warehouse {warehouse.name}: orders={warehouse_orders_count}")
+        
+        # ДОБАВЛЕНО: Создаем склады из orders_data, если их нет в warehouses
+        # (склады с нулевыми остатками, но с заказами)
+        # ИСПРАВЛЕНИЕ 28.10.2025: Используем нормализованные названия для проверки
+        existing_warehouse_names = {normalize_warehouse_name(wh.name) for wh in warehouses}
+        
+        for order in orders_data:
+            order_nm_id = order.get("nmId")
+            if order_nm_id != nm_id:
+                continue
+                
+            order_warehouse_raw = order.get("warehouseName", "").strip()
+            normalized_order_warehouse = normalize_warehouse_name(order_warehouse_raw)
+            
+            # ИСПРАВЛЕНИЕ 28.10.2025: isCancel уже отфильтрован выше при создании orders_data
+            # Но оставим проверку для надежности
+            is_canceled = order.get("isCancel", False)
+            
+            if is_canceled or not order_warehouse_raw:
+                continue
+            
+            # Проверяем что это реальный склад и его еще нет (по нормализованному имени)
+            if is_real_warehouse(order_warehouse_raw) and normalized_order_warehouse not in existing_warehouse_names:
+                # Считаем заказы для этого склада (используем нормализацию)
+                warehouse_orders_count = 0
+                for o in orders_data:
+                    if (o.get("nmId") == nm_id and 
+                        normalize_warehouse_name(o.get("warehouseName", "").strip()) == normalized_order_warehouse and
+                        not o.get("isCancel", False)):
+                        warehouse_orders_count += 1
+                
+                if warehouse_orders_count > 0:
+                    # Создаем склад с нулевыми остатками, но с заказами
+                    new_warehouse = Warehouse(
+                        name=order_warehouse_raw,  # Используем оригинальное имя для отображения
+                        stock=0,  # Нет остатков
+                        orders=warehouse_orders_count
+                    )
+                    warehouses.append(new_warehouse)
+                    existing_warehouse_names.add(normalized_order_warehouse)  # Добавляем в set
+                    total_orders += warehouse_orders_count
+                    
+                    logger.info(f"  Created warehouse with zero stock: {order_warehouse_raw} (orders={warehouse_orders_count})")
+        
+        logger.debug(f"Product totals: stock={real_warehouse_stock}, orders={total_orders}, warehouses={len(warehouses)}")
+        
+        # NEW: Classify warehouses by type (FBO/FBS) and calculate stock breakdown
+        fbo_stock = 0
+        fbs_stock = 0
+        
+        if self.warehouse_classifier:
+            # Используем классификатор складов для разделения остатков
+            for warehouse in warehouses:
+                warehouse_type = self.warehouse_classifier.classify_warehouse(warehouse.name)
+                
+                from stock_tracker.services.warehouse_classifier import WarehouseType
+                
+                if warehouse_type == WarehouseType.FBO:
+                    fbo_stock += warehouse.stock
+                elif warehouse_type == WarehouseType.FBS:
+                    fbs_stock += warehouse.stock
+                # Unknown warehouses не добавляем ни в FBO, ни в FBS
+            
+            logger.debug(f"Stock breakdown: FBO={fbo_stock}, FBS={fbs_stock}, Unknown={real_warehouse_stock - fbo_stock - fbs_stock}")
+        else:
+            logger.warning("Warehouse classifier not initialized, FBO/FBS stock breakdown unavailable")
         
         # Calculate turnover rate - FIXED: Use real warehouse stock
         turnover_rate = 0.0
         if real_warehouse_stock > 0 and total_orders > 0:
             turnover_rate = total_orders / real_warehouse_stock
         
-        # Create Product
+        # ИСПРАВЛЕНО 26.10.2025: Убран несуществующий параметр wb_article (дубликат wildberries_article)
+        # ИСПРАВЛЕНО: Убран несуществующий параметр turnover_rate (используется turnover)
         product = Product(
             wildberries_article=nm_id,
             seller_article=vendor_code,
-            wb_article=nm_id,
             total_orders=total_orders,  # Real orders data from API
             total_stock=real_warehouse_stock,  # FIXED: Use only real warehouse stock
-            turnover_rate=turnover_rate,  # Calculated turnover
+            fbo_stock=fbo_stock,  # NEW: FBO warehouses stock
+            fbs_stock=fbs_stock,  # NEW: FBS warehouses stock
+            turnover=turnover_rate,  # ИСПРАВЛЕНО: правильное имя параметра
             warehouses=warehouses
         )
         
-        logger.debug(f"Created product {vendor_code}: {total_orders} orders, {real_warehouse_stock} real stock (vs {total_quantity} total), {turnover_rate:.3f} turnover")
+        logger.debug(f"Created product {vendor_code}: {total_orders} orders, {real_warehouse_stock} real stock (FBO={fbo_stock}, FBS={fbs_stock}), {turnover_rate:.3f} turnover")
         
         return product
 
@@ -931,6 +1335,119 @@ class ProductService:
             logger.debug(f"Failed to analyze performance: {e}")
             return {"category": "unknown", "recommendation": "Analysis failed"}
     
+    async def sync_product_with_verification(self, seller_article: str, 
+                                           wildberries_article: int,
+                                           expected_wb_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Sync single product with calculation verification and detailed debugging.
+        
+        Args:
+            seller_article: Product seller article
+            wildberries_article: Product WB article (nmId)
+            expected_wb_data: Expected WB data for verification (optional)
+            
+        Returns:
+            Sync result with verification data and debugging info
+        """
+        try:
+            logger.info(f"Starting verified sync for product {seller_article} (nmId: {wildberries_article})")
+            
+            # Import here to avoid circular imports
+            from stock_tracker.api.products import WildberriesProductDataFetcher
+            from stock_tracker.core.calculator import WildberriesCalculator
+            from stock_tracker.utils.calculation_verifier import CalculationVerifier
+            
+            # Initialize data fetcher
+            data_fetcher = WildberriesProductDataFetcher(self.wb_client)
+            
+            # Fetch data with precise parameters (last 30 days, exclude canceled)
+            orders_data, warehouse_data = await data_fetcher.fetch_product_data(
+                seller_article=seller_article,
+                wildberries_article=wildberries_article,
+                orders_date_from=(datetime.now() - timedelta(days=30)).strftime("%Y-%m-%dT00:00:00")
+            )
+            
+            # Use improved calculation with debugging
+            calculator = WildberriesCalculator()
+            
+            # Calculate total orders with debugging
+            total_orders, debug_info = calculator.calculate_total_orders_with_debug(
+                orders_data, wildberries_article
+            )
+            
+            # Calculate orders per warehouse
+            warehouse_orders = {}
+            for warehouse_name in debug_info["warehouse_breakdown"]:
+                warehouse_orders[warehouse_name] = calculator.calculate_warehouse_orders(
+                    orders_data, wildberries_article, warehouse_name
+                )
+            
+            # Validate calculation consistency
+            validation = calculator.validate_orders_calculation(
+                wildberries_article, total_orders, warehouse_orders
+            )
+            
+            # Create product with corrected data
+            product = Product(seller_article=seller_article, wildberries_article=wildberries_article)
+            
+            # Add warehouses including zero-stock ones with orders
+            for warehouse_name, orders_count in warehouse_orders.items():
+                stock = calculator.calculate_warehouse_stock(
+                    warehouse_data, wildberries_article, warehouse_name
+                )
+                warehouse = Warehouse(
+                    name=warehouse_name, 
+                    orders=orders_count, 
+                    stock=stock
+                )
+                product.add_warehouse(warehouse)
+            
+            # Perform verification if expected data provided
+            verification_result = None
+            if expected_wb_data:
+                our_calculation = {
+                    "total_orders": total_orders,
+                    "warehouse_breakdown": warehouse_orders
+                }
+                
+                verification_result = CalculationVerifier.verify_orders_accuracy(
+                    wildberries_article, our_calculation, expected_wb_data
+                )
+            
+            result = {
+                "success": True,
+                "product": product,
+                "debug_info": debug_info,
+                "validation": validation,
+                "verification": verification_result,
+                "calculated_totals": {
+                    "total_orders": total_orders,
+                    "warehouse_count": len(warehouse_orders),
+                    "total_stock": product.total_stock
+                }
+            }
+            
+            logger.info(f"✅ Verified sync completed for {seller_article}")
+            logger.info(f"   Total orders: {total_orders}")
+            logger.info(f"   Warehouses: {len(warehouse_orders)}")
+            logger.info(f"   Validation: {'✅ PASSED' if validation['is_valid'] else '❌ FAILED'}")
+            
+            if verification_result:
+                logger.info(f"   Verification accuracy: {verification_result['overall_accuracy']:.1f}%")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to sync product with verification: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "product": None,
+                "debug_info": None,
+                "validation": None,
+                "verification": None
+            }
+
     async def health_check(self) -> Dict[str, Any]:
         """
         Perform service health check.

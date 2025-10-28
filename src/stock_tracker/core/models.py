@@ -130,6 +130,10 @@ class Product:
     total_stock: int = 0  # stockCount from API v2
     turnover: float = 0.0  # calculated: orders/stock
     
+    # Stock breakdown by warehouse type (NEW: FBO/FBS classification)
+    fbo_stock: int = 0  # Stock on WB warehouses (Fulfillment by Ozon/WB)
+    fbs_stock: int = 0  # Stock on seller warehouses (Fulfillment by Seller)
+    
     # New API v2 fields
     subject_id: Optional[int] = None  # subjectID from API v2
     brand_name: Optional[str] = None  # brandName from API v2  

@@ -372,25 +372,29 @@ class GoogleSheetsOptimizer:
         async def read_range_batch(range_batch: List[str]) -> List[Tuple[str, List[List[Any]]]]:
             """Read a batch of ranges."""
             try:
-                # Use Sheets API batch get to read multiple ranges at once
-                spreadsheet = sheets_client.service.spreadsheets()
-                result = spreadsheet.values().batchGet(
-                    spreadsheetId=spreadsheet_id,
-                    ranges=range_batch,
-                    valueRenderOption='UNFORMATTED_VALUE',
-                    dateTimeRenderOption='FORMATTED_STRING'
-                ).execute()
+                # Use gspread client to read ranges
+                # Get the gspread client (not GoogleSheetsClient wrapper)
+                spreadsheet = sheets_client.get_spreadsheet(spreadsheet_id)
                 
-                # Extract values for each range
+                # Read each range individually (gspread doesn't have native batch get)
                 batch_results = []
-                value_ranges = result.get('valueRanges', [])
-                
-                for i, range_name in enumerate(range_batch):
-                    if i < len(value_ranges):
-                        values = value_ranges[i].get('values', [])
-                    else:
-                        values = []
-                    batch_results.append((range_name, values))
+                for range_name in range_batch:
+                    try:
+                        # Parse range (e.g., "Sheet1!A1:B10" or just "A1:B10")
+                        if '!' in range_name:
+                            sheet_name, cell_range = range_name.split('!', 1)
+                            worksheet = spreadsheet.worksheet(sheet_name)
+                        else:
+                            # Use default worksheet
+                            worksheet = spreadsheet.get_worksheet(0)
+                            cell_range = range_name
+                        
+                        # Get values from range
+                        values = worksheet.get(cell_range)
+                        batch_results.append((range_name, values))
+                    except Exception as range_error:
+                        logger.warning(f"Failed to read range {range_name}: {range_error}")
+                        batch_results.append((range_name, []))
                 
                 return batch_results
             
@@ -404,10 +408,15 @@ class GoogleSheetsOptimizer:
         )
         
         # Convert to dictionary
+        # batch_results is a list of lists of tuples: [[(range, values), ...], ...]
         result_dict = {}
         for batch_result in batch_results:
-            for range_name, values in batch_result:
-                result_dict[range_name] = values
+            # batch_result is a list of (range_name, values) tuples
+            if isinstance(batch_result, list):
+                for item in batch_result:
+                    if isinstance(item, tuple) and len(item) == 2:
+                        range_name, values = item
+                        result_dict[range_name] = values
         
         logger.info(f"Successfully read {len(result_dict)} ranges")
         return result_dict
@@ -437,26 +446,33 @@ class GoogleSheetsOptimizer:
         async def write_range_batch(batch_items: List[Tuple[str, List[List[Any]]]]) -> bool:
             """Write a batch of ranges."""
             try:
-                # Prepare batch update request
-                value_ranges = []
+                # Use gspread client to write ranges
+                spreadsheet = sheets_client.get_spreadsheet(spreadsheet_id)
+                
+                # Write each range individually (gspread doesn't have native batch update)
+                updated_cells = 0
                 for range_name, values in batch_items:
-                    value_ranges.append({
-                        'range': range_name,
-                        'values': values,
-                        'majorDimension': 'ROWS'
-                    })
+                    try:
+                        # Parse range (e.g., "Sheet1!A1:B10" or just "A1:B10")
+                        if '!' in range_name:
+                            sheet_name, cell_range = range_name.split('!', 1)
+                            worksheet = spreadsheet.worksheet(sheet_name)
+                        else:
+                            # Use default worksheet
+                            worksheet = spreadsheet.get_worksheet(0)
+                            cell_range = range_name
+                        
+                        # Update values in range
+                        worksheet.update(cell_range, values, value_input_option='USER_ENTERED')
+                        
+                        # Count updated cells
+                        rows = len(values)
+                        cols = max(len(row) for row in values) if values else 0
+                        updated_cells += rows * cols
+                        
+                    except Exception as range_error:
+                        logger.warning(f"Failed to write range {range_name}: {range_error}")
                 
-                # Execute batch update
-                spreadsheet = sheets_client.service.spreadsheets()
-                result = spreadsheet.values().batchUpdate(
-                    spreadsheetId=spreadsheet_id,
-                    body={
-                        'valueInputOption': 'USER_ENTERED',
-                        'data': value_ranges
-                    }
-                ).execute()
-                
-                updated_cells = result.get('totalUpdatedCells', 0)
                 logger.debug(f"Batch update completed: {updated_cells} cells updated")
                 
                 return True

@@ -1,0 +1,86 @@
+{
+  "validation_timestamp": "2025-10-25T00:00:00Z",
+  "overall_stats": {
+    "products_tested": 3,
+    "products_passed": 3,
+    "products_failed": 0,
+    "pass_rate": 100.0,
+    "critical_failures": 0,
+    "stock_tolerance": 10.0,
+    "orders_tolerance": 5.0
+  },
+  "fbs_validation": {
+    "total_fbs_articles": 3,
+    "fbs_included": [
+      "Its1_2_3/50g+Aks5/20g.FBS",
+      "Its2/50g+Aks5/20g.FBS",
+      "ItsSport2/50g+Aks5/20g.FBS"
+    ],
+    "fbs_missing": [],
+    "fbs_with_marketplace": [
+      "Its1_2_3/50g+Aks5/20g.FBS",
+      "Its2/50g+Aks5/20g.FBS",
+      "ItsSport2/50g+Aks5/20g.FBS"
+    ],
+    "fbs_without_marketplace": [],
+    "inclusion_rate": 100.0,
+    "marketplace_rate": 100.0
+  },
+  "critical_failures": [],
+  "detailed_results": [
+    {
+      "article": "Its1_2_3/50g",
+      "stock_diff_percent": 0.0,
+      "orders_diff_percent": 0.0,
+      "stock_within_tolerance": true,
+      "orders_within_tolerance": true,
+      "marketplace_included": true,
+      "wb_data": {
+        "stock": 694,
+        "orders": 103
+      },
+      "st_data": {
+        "stock": 694,
+        "orders": 103
+      }
+    },
+    {
+      "article": "ItsSport2/50g",
+      "stock_diff_percent": 0.0,
+      "orders_diff_percent": 0.0,
+      "stock_within_tolerance": true,
+      "orders_within_tolerance": true,
+      "marketplace_included": true,
+      "wb_data": {
+        "stock": 1258,
+        "orders": 39
+      },
+      "st_data": {
+        "stock": 1258,
+        "orders": 39
+      }
+    },
+    {
+      "article": "Its2/50g",
+      "stock_diff_percent": 0.0,
+      "orders_diff_percent": 0.0,
+      "stock_within_tolerance": true,
+      "orders_within_tolerance": true,
+      "marketplace_included": true,
+      "wb_data": {
+        "stock": 571,
+        "orders": 80
+      },
+      "st_data": {
+        "stock": 571,
+        "orders": 80
+      }
+    }
+  ],
+  "validation_criteria": {
+    "stock_tolerance_percent": 10.0,
+    "orders_tolerance_percent": 5.0,
+    "required_marketplace_inclusion": true,
+    "required_fbs_inclusion": true
+  }
+}

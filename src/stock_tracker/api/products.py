@@ -595,6 +595,70 @@ def group_warehouse_by_product(warehouse_data: List[Dict[str, Any]]) -> Dict[Tup
         logger.error(f"Failed to group warehouse data: {e}")
         return {}
 
+    async def fetch_supplier_orders_precise(self, date_from: str, 
+                                          date_to: Optional[str] = None,
+                                          flag: int = 0,
+                                          include_canceled: bool = False) -> List[Dict[str, Any]]:
+        """
+        Fetch supplier orders with precise date filtering to match WB logic.
+        
+        Args:
+            date_from: Start date in RFC3339 format
+            date_to: End date (optional, for range filtering)
+            flag: Query flag (0 for incremental, 1 for full day data)
+            include_canceled: Whether to include canceled orders (default: False like WB)
+            
+        Returns:
+            List of order records filtered by date range and cancellation status
+            
+        Raises:
+            APIError: If API request fails
+            ValidationError: If parameters are invalid
+        """
+        try:
+            logger.info(f"Fetching precise orders: {date_from} to {date_to or 'latest'}, "
+                       f"include_canceled: {include_canceled}")
+            
+            # Get raw data from API
+            response_data = await self.fetch_supplier_orders(date_from, flag)
+            
+            filtered_orders = []
+            stats = {
+                "raw_count": len(response_data),
+                "canceled_filtered": 0,
+                "date_filtered": 0,
+                "final_count": 0
+            }
+            
+            for order in response_data:
+                # Filter canceled orders if required (matching WB logic)
+                if not include_canceled and order.get("isCancel", False):
+                    stats["canceled_filtered"] += 1
+                    continue
+                
+                # Filter by date range if date_to provided
+                if date_to:
+                    order_date = order.get("date", "")
+                    if order_date and order_date > date_to:
+                        stats["date_filtered"] += 1
+                        continue
+                
+                filtered_orders.append(order)
+            
+            stats["final_count"] = len(filtered_orders)
+            
+            logger.info(f"Orders filtering stats: {stats}")
+            logger.info(f"   Raw from API: {stats['raw_count']}")
+            logger.info(f"   Filtered canceled: {stats['canceled_filtered']}")
+            logger.info(f"   Filtered by date: {stats['date_filtered']}")
+            logger.info(f"   Final count: {stats['final_count']}")
+            
+            return filtered_orders
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch precise supplier orders: {e}")
+            raise APIError(f"Precise orders fetch failed: {e}")
+
 
 if __name__ == "__main__":
     # Test product data fetcher

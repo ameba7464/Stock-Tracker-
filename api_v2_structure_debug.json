@@ -1,0 +1,155 @@
+{
+  "totalCount": 0,
+  "items": [
+    {
+      "nmID": 163383326,
+      "isDeleted": false,
+      "subjectName": "Комплексные пищевые добавки",
+      "name": "Морской коллаген хондропротектор порошок для лица и волос",
+      "vendorCode": "Its1_2_3/50g",
+      "brandName": "ITS COLLAGEN",
+      "mainPhoto": "https://basket-11.wbbasket.ru/vol1633/part163383/163383326/images/c246x328/1.webp",
+      "hasSizes": false,
+      "metrics": {
+        "ordersCount": 112,
+        "ordersSum": 197221,
+        "avgOrders": 14,
+        "avgOrdersByMonth": [
+          {
+            "start": "2025-10-20",
+            "end": "2025-10-27",
+            "value": 14
+          }
+        ],
+        "buyoutCount": 50,
+        "buyoutSum": 86824,
+        "buyoutPercent": 96,
+        "stockCount": 3479,
+        "stockSum": 5642590,
+        "saleRate": {
+          "days": 46,
+          "hours": 13
+        },
+        "avgStockTurnover": {
+          "days": 38,
+          "hours": 3
+        },
+        "toClientCount": 71,
+        "fromClientCount": 4,
+        "officeMissingTime": {
+          "days": 2,
+          "hours": 2
+        },
+        "lostOrdersCount": 0,
+        "lostOrdersSum": 0,
+        "lostBuyoutsCount": 0,
+        "lostBuyoutsSum": 0,
+        "currentPrice": {
+          "minPrice": 1622,
+          "maxPrice": 1622
+        },
+        "availability": "balanced"
+      }
+    },
+    {
+      "nmID": 163383327,
+      "isDeleted": false,
+      "subjectName": "Комплексные пищевые добавки",
+      "name": "Коллаген морской порошок питьевой для суставов и связок",
+      "vendorCode": "Its2/50g",
+      "brandName": "ITS COLLAGEN",
+      "mainPhoto": "https://basket-11.wbbasket.ru/vol1633/part163383/163383327/images/c246x328/1.webp",
+      "hasSizes": false,
+      "metrics": {
+        "ordersCount": 79,
+        "ordersSum": 147341,
+        "avgOrders": 9.88,
+        "avgOrdersByMonth": [
+          {
+            "start": "2025-10-20",
+            "end": "2025-10-27",
+            "value": 9.88
+          }
+        ],
+        "buyoutCount": 46,
+        "buyoutSum": 84706,
+        "buyoutPercent": 96,
+        "stockCount": 2526,
+        "stockSum": 4445760,
+        "saleRate": {
+          "days": 34,
+          "hours": 18
+        },
+        "avgStockTurnover": {
+          "days": 34,
+          "hours": 3
+        },
+        "toClientCount": 39,
+        "fromClientCount": 2,
+        "officeMissingTime": {
+          "days": 1,
+          "hours": 13
+        },
+        "lostOrdersCount": 0,
+        "lostOrdersSum": 0,
+        "lostBuyoutsCount": 0,
+        "lostBuyoutsSum": 0,
+        "currentPrice": {
+          "minPrice": 1760,
+          "maxPrice": 1760
+        },
+        "availability": "balanced"
+      }
+    },
+    {
+      "nmID": 163383328,
+      "isDeleted": false,
+      "subjectName": "Комплексные пищевые добавки",
+      "name": "Коллаген морской порошок для суставов и мышц спортсменов",
+      "vendorCode": "ItsSport2/50g",
+      "brandName": "ITS COLLAGEN",
+      "mainPhoto": "https://basket-11.wbbasket.ru/vol1633/part163383/163383328/images/c246x328/1.webp",
+      "hasSizes": false,
+      "metrics": {
+        "ordersCount": 35,
+        "ordersSum": 66103,
+        "avgOrders": 4.38,
+        "avgOrdersByMonth": [
+          {
+            "start": "2025-10-20",
+            "end": "2025-10-27",
+            "value": 4.38
+          }
+        ],
+        "buyoutCount": 22,
+        "buyoutSum": 41461,
+        "buyoutPercent": 92,
+        "stockCount": 1273,
+        "stockSum": 2245572,
+        "saleRate": {
+          "days": 23,
+          "hours": 8
+        },
+        "avgStockTurnover": {
+          "days": 19,
+          "hours": 0
+        },
+        "toClientCount": 25,
+        "fromClientCount": 1,
+        "officeMissingTime": {
+          "days": 2,
+          "hours": 2
+        },
+        "lostOrdersCount": 0,
+        "lostOrdersSum": 0,
+        "lostBuyoutsCount": 0,
+        "lostBuyoutsSum": 0,
+        "currentPrice": {
+          "minPrice": 1764,
+          "maxPrice": 1764
+        },
+        "availability": "balanced"
+      }
+    }
+  ]
+}

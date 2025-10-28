@@ -468,6 +468,51 @@ class WildberriesAPIClient:
             task_id=task_id
         )
     
+    @rate_limited("wildberries")
+    async def get_supplier_orders(self, date_from: str, flag: int = 0) -> List[Dict[str, Any]]:
+        """
+        Get supplier orders from statistics API v1.
+        
+        КРИТИЧНО: Это СТАРЫЙ V1 endpoint для заказов, он ВСЕ ЕЩЕ РАБОТАЕТ!
+        URL: https://statistics-api.wildberries.ru/api/v1/supplier/orders
+        
+        Args:
+            date_from: Date in RFC3339 format
+            flag: 0 or 1
+            
+        Returns:
+            List of order records
+        """
+        # ИСПРАВЛЕНО 27.10.2025: используем statistics-api (V1) для заказов
+        url = "https://statistics-api.wildberries.ru/api/v1/supplier/orders"
+        
+        params = {
+            "dateFrom": date_from,
+            "flag": flag
+        }
+        
+        logger.info(f"Fetching supplier orders from {date_from} (flag={flag})")
+        
+        try:
+            response = self._make_request("GET", url, params=params)
+            
+            # Parse response
+            data = response.json()
+            
+            if not isinstance(data, list):
+                raise WildberriesAPIError(
+                    f"Invalid supplier/orders response: expected list, got {type(data)}",
+                    endpoint=url
+                )
+            
+            logger.info(f"Retrieved {len(data)} supplier orders")
+            return data
+            
+        except Exception as e:
+            if isinstance(e, WildberriesAPIError):
+                raise
+            raise WildberriesAPIError(f"Failed to get supplier orders: {e}", endpoint=url)
+    
     def test_connection(self) -> Dict[str, Any]:
         """
         Test connection to Wildberries Analytics API v2.

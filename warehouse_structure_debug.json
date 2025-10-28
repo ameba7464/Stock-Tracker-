@@ -1,0 +1,39 @@
+{
+  "vendorCode": "Its1_2_3/50g",
+  "nmId": 163383326,
+  "volume": 0.44,
+  "warehouses": [
+    {
+      "warehouseName": "В пути до получателей",
+      "quantity": 70
+    },
+    {
+      "warehouseName": "В пути возвраты на склад WB",
+      "quantity": 5
+    },
+    {
+      "warehouseName": "Всего находится на складах",
+      "quantity": 482
+    },
+    {
+      "warehouseName": "Краснодар",
+      "quantity": 52
+    },
+    {
+      "warehouseName": "Чехов 1",
+      "quantity": 193
+    },
+    {
+      "warehouseName": "Рязань (Тюшевское)",
+      "quantity": 52
+    },
+    {
+      "warehouseName": "Котовск",
+      "quantity": 96
+    },
+    {
+      "warehouseName": "Самара (Новосемейкино)",
+      "quantity": 89
+    }
+  ]
+}

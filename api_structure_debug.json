@@ -1,0 +1,131 @@
+[
+  {
+    "vendorCode": "Its1_2_3/50g",
+    "nmId": 163383326,
+    "volume": 0.44,
+    "warehouses": [
+      {
+        "warehouseName": "В пути до получателей",
+        "quantity": 71
+      },
+      {
+        "warehouseName": "В пути возвраты на склад WB",
+        "quantity": 4
+      },
+      {
+        "warehouseName": "Всего находится на складах",
+        "quantity": 486
+      },
+      {
+        "warehouseName": "Подольск 3",
+        "quantity": 1
+      },
+      {
+        "warehouseName": "Краснодар",
+        "quantity": 52
+      },
+      {
+        "warehouseName": "Чехов 1",
+        "quantity": 193
+      },
+      {
+        "warehouseName": "Рязань (Тюшевское)",
+        "quantity": 53
+      },
+      {
+        "warehouseName": "Котовск",
+        "quantity": 96
+      },
+      {
+        "warehouseName": "Самара (Новосемейкино)",
+        "quantity": 91
+      }
+    ]
+  },
+  {
+    "vendorCode": "Its2/50g",
+    "nmId": 163383327,
+    "volume": 0.16,
+    "warehouses": [
+      {
+        "warehouseName": "В пути до получателей",
+        "quantity": 39
+      },
+      {
+        "warehouseName": "В пути возвраты на склад WB",
+        "quantity": 2
+      },
+      {
+        "warehouseName": "Всего находится на складах",
+        "quantity": 500
+      },
+      {
+        "warehouseName": "Подольск 3",
+        "quantity": 19
+      },
+      {
+        "warehouseName": "Электросталь",
+        "quantity": 81
+      },
+      {
+        "warehouseName": "Краснодар",
+        "quantity": 33
+      },
+      {
+        "warehouseName": "Чехов 1",
+        "quantity": 212
+      },
+      {
+        "warehouseName": "Рязань (Тюшевское)",
+        "quantity": 88
+      },
+      {
+        "warehouseName": "Котовск",
+        "quantity": 67
+      }
+    ]
+  },
+  {
+    "vendorCode": "ItsSport2/50g",
+    "nmId": 163383328,
+    "volume": 0.16,
+    "warehouses": [
+      {
+        "warehouseName": "В пути до получателей",
+        "quantity": 25
+      },
+      {
+        "warehouseName": "В пути возвраты на склад WB",
+        "quantity": 1
+      },
+      {
+        "warehouseName": "Всего находится на складах",
+        "quantity": 250
+      },
+      {
+        "warehouseName": "Подольск 3",
+        "quantity": 23
+      },
+      {
+        "warehouseName": "Краснодар",
+        "quantity": 7
+      },
+      {
+        "warehouseName": "Чехов 1",
+        "quantity": 86
+      },
+      {
+        "warehouseName": "Рязань (Тюшевское)",
+        "quantity": 31
+      },
+      {
+        "warehouseName": "Котовск",
+        "quantity": 34
+      },
+      {
+        "warehouseName": "Самара (Новосемейкино)",
+        "quantity": 69
+      }
+    ]
+  }
+]

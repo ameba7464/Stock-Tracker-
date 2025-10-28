@@ -290,10 +290,13 @@ class ProductDataFormatter:
             Product instance or None if parsing fails
         """
         try:
-            # Ensure we have enough columns
-            if len(row_data) < 8:
-                logger.warning(f"Row {row_number}: insufficient columns ({len(row_data)})")
-                return None
+            # Ensure we have enough columns (updated to 10 columns with FBO/FBS)
+            min_columns = 10
+            if len(row_data) < min_columns:
+                logger.warning(f"Row {row_number}: insufficient columns ({len(row_data)}) - will pad with empty values")
+                # Pad with empty values to reach min_columns for compatibility
+                while len(row_data) < min_columns:
+                    row_data.append("")
             
             # Extract basic product data
             seller_article = str(row_data[0]).strip() if row_data[0] else ""
@@ -494,7 +497,7 @@ class ProductDataFormatter:
         Returns:
             List with empty values for each column
         """
-        return ["", "", 0, 0, 0.0, "", "", ""]
+        return ["", "", 0, 0, 0.0, "", "", "", 0, 0]  # Updated to 10 columns (added FBO/FBS)
     
     @staticmethod
     def validate_row_data(row_data: List[Any]) -> Dict[str, Any]:

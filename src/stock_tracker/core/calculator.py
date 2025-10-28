@@ -16,6 +16,7 @@ from stock_tracker.core.models import Product, Warehouse
 from stock_tracker.utils.logger import get_logger
 from stock_tracker.utils.exceptions import CalculationError
 from stock_tracker.core.validator import WildberriesDataValidator
+from stock_tracker.utils.warehouse_mapper import normalize_warehouse_name, is_marketplace_warehouse
 
 
 logger = get_logger(__name__)
@@ -30,7 +31,8 @@ DELIVERY_STATUSES = {
     "В пути с ПВЗ покупателю",
     "Удержания и возмещения",
     "К доплате",
-    "Общий итог"
+    "Общий итог",
+    "Отправлен",  # ДОБАВЛЕНО 26.10.2025: статус доставки
 }
 
 VALID_WAREHOUSE_PATTERNS = [
@@ -41,7 +43,14 @@ VALID_WAREHOUSE_PATTERNS = [
 
 
 def is_real_warehouse(warehouse_name: str) -> bool:
-    """Проверить что это реальный склад, а не статус."""
+    """
+    Проверить что это реальный склад, а не статус.
+    
+    ИСПРАВЛЕНО 26.10.2025:
+    - Убрана жесткая валидация validate_warehouse_name()
+    - Улучшено определение Маркетплейс (убраны пробелы из индикаторов)
+    - Более мягкие критерии для обычных складов
+    """
     if not warehouse_name or not isinstance(warehouse_name, str):
         return False
     
@@ -56,8 +65,42 @@ def is_real_warehouse(warehouse_name: str) -> bool:
     # Исключаем строки "в пути"
     if "в пути" in warehouse_name.lower():
         return False
-        
-    return True
+    
+    warehouse_name_lower = warehouse_name.lower()
+    
+    # КРИТИЧЕСКИ ВАЖНО: ПРИОРИТЕТ #1 - Маркетплейс/FBS склады
+    # ИСПРАВЛЕНО: убраны пробелы для лучшего поиска (было "мп ", стало "мп")
+    marketplace_indicators = [
+        "маркетплейс", "marketplace", 
+        "склад продавца", "склад селлера",
+        "fbs", "fulfillment by seller",
+        "мп", "mp",  # ИСПРАВЛЕНО: убрали пробелы
+        "сп"  # склад продавца (сокращенно)
+    ]
+    
+    # Если это склад Маркетплейс - ВСЕГДА включаем БЕЗ дополнительных проверок
+    if any(indicator in warehouse_name_lower for indicator in marketplace_indicators):
+        logger.info(f"✅ CRITICAL: Marketplace/FBS warehouse INCLUDED: {warehouse_name}")
+        return True
+    
+    # ИСПРАВЛЕНО: Для обычных складов - более мягкая валидация
+    # Не требуем строгого соответствия regex паттернам
+    
+    # Проверяем что это не пустая строка и не только цифры
+    warehouse_name_stripped = warehouse_name.strip()
+    if len(warehouse_name_stripped) < 2:
+        return False
+    
+    if warehouse_name_stripped.isdigit():
+        return False
+    
+    # Если название содержит хотя бы одну букву - это потенциально склад
+    if any(c.isalpha() for c in warehouse_name):
+        logger.debug(f"✅ Warehouse INCLUDED: {warehouse_name}")
+        return True
+    
+    logger.debug(f"❌ Warehouse FILTERED: {warehouse_name}")
+    return False
 
 
 def validate_warehouse_name(warehouse_name: str) -> bool:
@@ -192,27 +235,34 @@ class WildberriesCalculator:
     def calculate_warehouse_orders(orders_data: List[Dict[str, Any]], 
                                  nm_id: int, warehouse_name: str) -> int:
         """
-        Calculate orders for specific warehouse per urls.md logic.
+        Calculate orders for specific warehouse with improved accuracy.
         
-        From urls.md: "По складу: подсчитывается количество записей в 
-        /supplier/orders где совпадают nmId + warehouseName"
-        
-        Args:
-            orders_data: Data from /supplier/orders API
-            nm_id: Product nmId to filter by
-            warehouse_name: Warehouse name to filter by
-            
-        Returns:
-            Number of orders for the specific warehouse
+        ИСПРАВЛЕНИЕ: Точный подсчет без дублирования.
         """
         order_count = 0
+        debug_matches = []
         
-        for order in orders_data:
-            if (order.get("nmId") == nm_id and 
-                order.get("warehouseName") == warehouse_name):
+        for i, order in enumerate(orders_data):
+            # Точное сопоставление
+            order_nm_id = order.get("nmId")
+            order_warehouse = order.get("warehouseName", "").strip()
+            is_canceled = order.get("isCancel", False)
+            
+            # КРИТИЧЕСКИ ВАЖНО: Точное соответствие
+            if (order_nm_id == nm_id and 
+                order_warehouse == warehouse_name and 
+                not is_canceled):
                 order_count += 1
+                debug_matches.append({
+                    "index": i,
+                    "warehouse": order_warehouse,
+                    "canceled": is_canceled,
+                    "date": order.get("date", "")
+                })
         
-        logger.debug(f"Calculated warehouse orders for nmId {nm_id}, warehouse '{warehouse_name}': {order_count}")
+        logger.debug(f"Warehouse orders for nmId {nm_id}, warehouse '{warehouse_name}': {order_count}")
+        logger.debug(f"Debug matches: {debug_matches[:3]}...")  # Показать первые 3
+        
         return order_count
     
     @staticmethod
@@ -238,6 +288,136 @@ class WildberriesCalculator:
         
         logger.debug(f"Calculated total orders for nmId {nm_id}: {order_count}")
         return order_count
+
+    @staticmethod
+    def calculate_total_orders_with_debug(orders_data: List[Dict[str, Any]], nm_id: int) -> Tuple[int, Dict[str, Any]]:
+        """
+        Calculate total orders for product with detailed debugging.
+        
+        Args:
+            orders_data: Data from /supplier/orders API
+            nm_id: Product nmId to calculate for
+            
+        Returns:
+            Tuple of (order_count, debug_info)
+        """
+        order_count = 0
+        debug_info = {
+            "nm_id": nm_id,
+            "total_records_checked": len(orders_data),
+            "matching_records": [],
+            "filtered_out": [],
+            "warehouse_breakdown": {},
+            "warehouse_type_breakdown": {}
+        }
+        
+        for i, order in enumerate(orders_data):
+            order_nm_id = order.get("nmId")
+            warehouse_name = order.get("warehouseName", "")
+            warehouse_type = order.get("warehouseType", "Unknown")
+            is_canceled = order.get("isCancel", False)
+            order_date = order.get("date", "")
+            
+            if order_nm_id == nm_id:
+                # Детальная диагностика каждого заказа
+                order_info = {
+                    "warehouse": warehouse_name,
+                    "type": warehouse_type,
+                    "canceled": is_canceled,
+                    "date": order_date,
+                    "index": i
+                }
+                
+                # Проверяем фильтры как в WB
+                if is_canceled:
+                    debug_info["filtered_out"].append({
+                        **order_info,
+                        "reason": "canceled_order"
+                    })
+                    continue
+                
+                # Фильтр по типу склада (включаем WB и МП)
+                if warehouse_type not in ["Склад WB", "Склад продавца"] and warehouse_type != "":
+                    debug_info["filtered_out"].append({
+                        **order_info,
+                        "reason": f"unknown_warehouse_type: {warehouse_type}"
+                    })
+                    continue
+                
+                # Фильтр по названию склада
+                if not is_real_warehouse(warehouse_name):
+                    debug_info["filtered_out"].append({
+                        **order_info,
+                        "reason": f"invalid_warehouse_name: {warehouse_name}"
+                    })
+                    continue
+                
+                # Валидный заказ - считаем
+                order_count += 1
+                debug_info["matching_records"].append(order_info)
+                
+                # Группировка по складам
+                if warehouse_name not in debug_info["warehouse_breakdown"]:
+                    debug_info["warehouse_breakdown"][warehouse_name] = 0
+                debug_info["warehouse_breakdown"][warehouse_name] += 1
+                
+                # Группировка по типам складов
+                if warehouse_type not in debug_info["warehouse_type_breakdown"]:
+                    debug_info["warehouse_type_breakdown"][warehouse_type] = 0
+                debug_info["warehouse_type_breakdown"][warehouse_type] += 1
+        
+        debug_info["total_orders_calculated"] = order_count
+        debug_info["wb_warehouses"] = sum(count for wh, count in debug_info["warehouse_breakdown"].items() 
+                                         if not any(mp in wh.lower() for mp in ["мп", "маркетплейс", "склад продавца"]))
+        debug_info["mp_warehouses"] = debug_info["total_orders_calculated"] - debug_info["wb_warehouses"]
+        
+        logger.info(f"🔍 DEBUG orders for nmId {nm_id}:")
+        logger.info(f"   Total API records: {debug_info['total_records_checked']}")
+        logger.info(f"   Matching orders: {order_count}")
+        logger.info(f"   - WB warehouses: {debug_info['wb_warehouses']}")
+        logger.info(f"   - MP warehouses: {debug_info['mp_warehouses']}")
+        logger.info(f"   Warehouse breakdown: {debug_info['warehouse_breakdown']}")
+        logger.info(f"   Type breakdown: {debug_info['warehouse_type_breakdown']}")
+        logger.info(f"   Filtered out: {len(debug_info['filtered_out'])} records")
+        
+        return order_count, debug_info
+
+    @staticmethod
+    def validate_orders_calculation(nm_id: int, calculated_total: int, 
+                                  calculated_by_warehouse: Dict[str, int]) -> Dict[str, Any]:
+        """
+        Validate that warehouse orders sum equals total orders.
+        
+        Args:
+            nm_id: Product nmId
+            calculated_total: Total orders calculated
+            calculated_by_warehouse: Orders per warehouse
+            
+        Returns:
+            Validation report
+        """
+        warehouse_sum = sum(calculated_by_warehouse.values())
+        is_valid = warehouse_sum == calculated_total
+        
+        validation = {
+            "nm_id": nm_id,
+            "calculated_total": calculated_total,
+            "warehouse_sum": warehouse_sum,
+            "difference": abs(warehouse_sum - calculated_total),
+            "is_valid": is_valid,
+            "warehouse_breakdown": calculated_by_warehouse
+        }
+        
+        if not is_valid:
+            logger.warning(f"⚠️ Orders validation failed for nmId {nm_id}:")
+            logger.warning(f"   Total calculated: {calculated_total}")
+            logger.warning(f"   Warehouse sum: {warehouse_sum}")
+            logger.warning(f"   Difference: {validation['difference']}")
+            logger.warning(f"   Warehouse breakdown: {calculated_by_warehouse}")
+        else:
+            logger.info(f"✅ Orders validation passed for nmId {nm_id}")
+        
+        return validation
     
     @staticmethod
     def calculate_turnover(total_orders: int, total_stock: int) -> float:
@@ -286,6 +466,16 @@ class WildberriesCalculator:
         """
         Group data by product per urls.md grouping logic.
         
+        ИСПРАВЛЕНА КРИТИЧЕСКАЯ ЛОГИКА:
+        - ОБЯЗАТЕЛЬНО включает склад Маркетплейс 
+        - Корректно обрабатывает FBS товары
+        - Точное распределение заказов без дублирования
+        
+        ДОБАВЛЕНО 26.10.2025:
+        - Детальное логирование всех складов из API
+        - Отслеживание включения/исключения каждого склада
+        - Специальный мониторинг Маркетплейс складов
+        
         From urls.md: "Группировка данных происходит по связке supplierArticle + nmId"
         
         Args:
@@ -299,9 +489,21 @@ class WildberriesCalculator:
             "supplier_article": "",
             "nm_id": 0,
             "warehouses": {},
-            "total_orders": 0,
+            # УДАЛЕНО 27.10.2025: total_orders не используется, рассчитывается из warehouse.orders
+            # "total_orders": 0,
             "total_stock": 0
         })
+        
+        logger.info("🔧 CRITICAL FIX: Starting enhanced grouping with Marketplace support")
+        
+        # ДОБАВЛЕНО 27.10.2025: Отслеживание уникальных заказов для предотвращения дублирования
+        processed_order_ids = set()
+        duplicate_orders_count = 0
+        
+        # ДОБАВЛЕНО 26.10.2025: Диагностическое логирование всех складов из API
+        all_warehouses_from_api = set()
+        marketplace_warehouses_detected = []
+        filtered_warehouses = []
         
         # Process warehouse remains data
         for item in warehouse_remains_data:
@@ -318,57 +520,197 @@ class WildberriesCalculator:
                 # Process warehouses
                 if "warehouses" in item:
                     for warehouse in item["warehouses"]:
-                        warehouse_name = warehouse.get("warehouseName", "")
+                        warehouse_name_raw = warehouse.get("warehouseName", "")
+                        # КРИТИЧЕСКИ ВАЖНО: Нормализуем название
+                        warehouse_name = normalize_warehouse_name(warehouse_name_raw)
                         quantity = warehouse.get("quantity", 0)
                         
-                        # ДОБАВИТЬ ФИЛЬТРАЦИЮ:
+                        # ДОБАВЛЕНО: Логируем ВСЕ склады из API
+                        all_warehouses_from_api.add(warehouse_name_raw)
+                        
+                        # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Всегда включаем Маркетплейс
                         if warehouse_name and is_real_warehouse(warehouse_name):
-                            if validate_warehouse_name(warehouse_name):
-                                # Только тогда добавляем как склад
-                                if warehouse_name not in group["warehouses"]:
-                                    group["warehouses"][warehouse_name] = {
-                                        "stock": 0,
-                                        "orders": 0
-                                    }
-                                group["warehouses"][warehouse_name]["stock"] += quantity
-                            else:
-                                logger.warning(f"Invalid warehouse name format: {warehouse_name}")
+                            # ДОБАВЛЕНО: Отслеживаем Маркетплейс
+                            if is_marketplace_warehouse(warehouse_name):
+                                marketplace_warehouses_detected.append({
+                                    "raw": warehouse_name_raw,
+                                    "normalized": warehouse_name,
+                                    "quantity": quantity,
+                                    "product": f"{supplier_article}/{nm_id}"
+                                })
+                                logger.info(f"🏪 MARKETPLACE INCLUDED: '{warehouse_name_raw}' -> '{warehouse_name}' (qty: {quantity})")
+                            
+                            # Создаем или обновляем склад
+                            if warehouse_name not in group["warehouses"]:
+                                group["warehouses"][warehouse_name] = {
+                                    "stock": 0,
+                                    "orders": 0,
+                                    "warehouse_type": "unknown",
+                                    "is_fbs": is_marketplace_warehouse(warehouse_name),
+                                    "raw_name": warehouse_name_raw  # Сохраняем исходное
+                                }
+                            
+                            # Обновляем остатки
+                            group["warehouses"][warehouse_name]["stock"] += quantity
+                            logger.debug(f"✅ Warehouse INCLUDED: {warehouse_name} += {quantity}")
                         else:
-                            logger.debug(f"Filtered out delivery status: {warehouse_name}")
+                            # ДОБАВЛЕНО: Логируем отфильтрованные склады
+                            filtered_warehouses.append({
+                                "raw": warehouse_name_raw,
+                                "normalized": warehouse_name,
+                                "reason": "filtered by is_real_warehouse()"
+                            })
+                            logger.debug(f"❌ Warehouse FILTERED: {warehouse_name_raw} -> {warehouse_name}")
         
-        # Process orders data to count orders per warehouse and total
+        # ДОБАВЛЕНО: Итоговый отчет по складам
+        logger.info(f"📊 WAREHOUSE SUMMARY:")
+        logger.info(f"   Total unique warehouses from API: {len(all_warehouses_from_api)}")
+        logger.info(f"   Marketplace warehouses detected: {len(marketplace_warehouses_detected)}")
+        logger.info(f"   Warehouses filtered out: {len(filtered_warehouses)}")
+        
+        if marketplace_warehouses_detected:
+            logger.info(f"🏪 MARKETPLACE DETAILS:")
+            for mp in marketplace_warehouses_detected:
+                logger.info(f"   - {mp['raw']} -> {mp['normalized']} (qty: {mp['quantity']}, product: {mp['product']})")
+        
+        if filtered_warehouses:
+            logger.warning(f"⚠️ FILTERED WAREHOUSES:")
+            for fw in filtered_warehouses[:10]:  # Показываем первые 10
+                logger.warning(f"   - {fw['raw']} -> {fw['normalized']} (reason: {fw['reason']})")
+            if len(filtered_warehouses) > 10:
+                logger.warning(f"   ... и еще {len(filtered_warehouses) - 10} складов")
+        
+        # Process orders data - КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ
+        orders_processed = 0
+        marketplace_orders = 0
+        
         for order in orders_data:
+            # ДОБАВЛЕНО 27.10.2025: Проверка уникальности заказа
+            order_id = order.get("gNumber") or order.get("odid") or order.get("srid")
+            
+            # Пропускаем дубликаты
+            if order_id and order_id in processed_order_ids:
+                duplicate_orders_count += 1
+                logger.debug(f"Skipping duplicate order: {order_id}")
+                continue
+            
+            # Отмечаем заказ как обработанный
+            if order_id:
+                processed_order_ids.add(order_id)
+            
             nm_id = order.get("nmId")
             supplier_article = order.get("supplierArticle", "")
-            warehouse_name = order.get("warehouseName", "")
+            warehouse_name_raw = order.get("warehouseName", "")
+            warehouse_name = normalize_warehouse_name(warehouse_name_raw)
+            warehouse_type = order.get("warehouseType", "")
+            is_canceled = order.get("isCancel", False)
             
-            if nm_id and supplier_article:
+            if nm_id and supplier_article and not is_canceled:
                 key = (supplier_article, nm_id)
                 group = grouped_data[key]
                 group["supplier_article"] = supplier_article
                 group["nm_id"] = nm_id
                 
-                # Count total orders
-                group["total_orders"] += 1
-                
-                # Count orders per warehouse
+                # КРИТИЧЕСКИ ВАЖНО: Точное распределение заказов
                 if warehouse_name:
-                    # ДОБАВИТЬ ФИЛЬТРАЦИЮ для заказов:
-                    if is_real_warehouse(warehouse_name) and validate_warehouse_name(warehouse_name):
+                    # Определяем тип склада
+                    is_marketplace = (
+                        warehouse_type == "Склад продавца" or
+                        is_marketplace_warehouse(warehouse_name)
+                    )
+                    
+                    # ВСЕГДА включаем склады Маркетплейс
+                    if is_marketplace:
+                        marketplace_orders += 1
+                        logger.debug(f"✅ Marketplace order: {warehouse_name} (type: {warehouse_type})")
+                        
                         if warehouse_name not in group["warehouses"]:
                             group["warehouses"][warehouse_name] = {
                                 "stock": 0,
-                                "orders": 0
+                                "orders": 0,
+                                "warehouse_type": warehouse_type,
+                                "is_fbs": True,
+                                "raw_name": warehouse_name_raw
                             }
+                        else:
+                            # Обновляем существующий склад как FBS
+                            group["warehouses"][warehouse_name]["is_fbs"] = True
+                            group["warehouses"][warehouse_name]["warehouse_type"] = warehouse_type
+                        
                         group["warehouses"][warehouse_name]["orders"] += 1
+                        orders_processed += 1
+                    
+                    # Для обычных складов WB - проверяем фильтры
+                    elif is_real_warehouse(warehouse_name):
+                        # СОЗДАЕМ СКЛАД ЕСЛИ ЕГО НЕТ
+                        if warehouse_name not in group["warehouses"]:
+                            group["warehouses"][warehouse_name] = {
+                                "stock": 0,  # Остатки будут из warehouse_remains
+                                "orders": 0,
+                                "warehouse_type": warehouse_type,
+                                "is_fbs": False,
+                                "raw_name": warehouse_name_raw
+                            }
+                            logger.debug(f"Created warehouse for WB order: {warehouse_name}")
+                        
+                        group["warehouses"][warehouse_name]["orders"] += 1
+                        orders_processed += 1
                     else:
-                        logger.debug(f"Filtered out order delivery status: {warehouse_name}")
+                        logger.debug(f"Filtered out order warehouse: {warehouse_name} (type: {warehouse_type})")
+                
+                # УДАЛЕНО 27.10.2025: Это поле не используется при создании Product
+                # group["total_orders"] += 1  # ❌ НЕ ИСПОЛЬЗУЕТСЯ!
+                # Вместо этого total_orders рассчитывается из warehouse.orders
+            else:
+                if is_canceled:
+                    logger.debug(f"Skipped canceled order for {warehouse_name}")
         
         # Calculate total stock for each product
         for group in grouped_data.values():
             group["total_stock"] = sum(wh["stock"] for wh in group["warehouses"].values())
         
-        logger.info(f"Grouped data into {len(grouped_data)} products")
+        logger.info(f"✅ CRITICAL FIX COMPLETED:")
+        logger.info(f"   - Products grouped: {len(grouped_data)}")
+        logger.info(f"   - Orders processed: {orders_processed}")
+        logger.info(f"   - Marketplace orders: {marketplace_orders}")
+        logger.info(f"   - Duplicate orders skipped: {duplicate_orders_count}")
+        logger.info(f"   - Unique order IDs tracked: {len(processed_order_ids)}")
+        
+        # Валидация что Маркетплейс включен
+        marketplace_products = 0
+        for group in grouped_data.values():
+            for wh_name, wh_data in group["warehouses"].items():
+                if wh_data.get("is_fbs", False):
+                    marketplace_products += 1
+                    break
+        
+        logger.info(f"   - Products with FBS/Marketplace: {marketplace_products}")
+        
+        # ДОБАВЛЕНО 27.10.2025: Валидация соответствия заказов
+        logger.info(f"\n📊 ORDERS VALIDATION:")
+        validation_errors = 0
+        
+        for (article, nm_id), group in grouped_data.items():
+            warehouse_orders_sum = sum(wh["orders"] for wh in group["warehouses"].values())
+            
+            # Считаем raw заказы для этого продукта (для валидации)
+            raw_orders = sum(1 for order in orders_data 
+                           if order.get("supplierArticle") == article 
+                           and order.get("nmId") == nm_id
+                           and not order.get("isCancel", False))
+            
+            if warehouse_orders_sum != raw_orders:
+                validation_errors += 1
+                logger.warning(f"⚠️  Orders mismatch for {article} (nmId: {nm_id}):")
+                logger.warning(f"   Raw orders from API: {raw_orders}")
+                logger.warning(f"   Warehouse sum: {warehouse_orders_sum}")
+                logger.warning(f"   Difference: {warehouse_orders_sum - raw_orders}")
+        
+        if validation_errors == 0:
+            logger.info("✅ All products passed orders validation")
+        else:
+            logger.warning(f"⚠️  {validation_errors} products failed validation")
+        
         return dict(grouped_data)
     
     @staticmethod
@@ -782,6 +1124,144 @@ class WildberriesCalculator:
                     "warehouse_items": len(warehouse_v1_data) if isinstance(warehouse_v1_data, list) else 0
                 }
             )
+
+    @staticmethod
+    def is_fbs_warehouse(warehouse_name: str, warehouse_type: str = "") -> bool:
+        """
+        Определить является ли склад FBS (Fulfillment by Seller).
+        
+        FBS склады КРИТИЧЕСКИ ВАЖНЫ для точности данных.
+        
+        Args:
+            warehouse_name: Название склада
+            warehouse_type: Тип склада из API (warehouseType)
+            
+        Returns:
+            True если это FBS склад
+        """
+        if not warehouse_name:
+            return False
+        
+        # Проверяем тип склада из API - САМЫЙ НАДЕЖНЫЙ ИНДИКАТОР
+        if warehouse_type == "Склад продавца":
+            logger.info(f"✅ FBS detected by warehouseType: {warehouse_name}")
+            return True
+        
+        # Проверяем название склада
+        return is_marketplace_warehouse(warehouse_name)
+
+    @staticmethod
+    def ensure_fbs_warehouse_inclusion(grouped_data: Dict[Tuple[str, int], Dict[str, Any]]) -> None:
+        """
+        Гарантировать включение всех FBS складов в результаты.
+        
+        КРИТИЧЕСКИ ВАЖНО: FBS остатки не должны теряться.
+        
+        Args:
+            grouped_data: Сгруппированные данные по товарам
+        """
+        total_fbs_warehouses = 0
+        total_fbs_stock = 0
+        total_fbs_orders = 0
+        
+        for product_key, product_data in grouped_data.items():
+            fbs_warehouses = []
+            
+            for warehouse_name, warehouse_info in product_data["warehouses"].items():
+                if warehouse_info.get("is_fbs", False):
+                    fbs_warehouses.append({
+                        "name": warehouse_name,
+                        "stock": warehouse_info["stock"],
+                        "orders": warehouse_info["orders"],
+                        "type": warehouse_info.get("warehouse_type", "unknown")
+                    })
+                    total_fbs_warehouses += 1
+                    total_fbs_stock += warehouse_info["stock"]
+                    total_fbs_orders += warehouse_info["orders"]
+            
+            if fbs_warehouses:
+                logger.info(f"✅ FBS warehouses ensured for {product_key[0]} (nmId={product_key[1]}):")
+                for fbs in fbs_warehouses:
+                    logger.info(f"   - {fbs['name']}: {fbs['stock']} stock, {fbs['orders']} orders")
+            else:
+                logger.debug(f"   No FBS warehouses for {product_key[0]}")
+        
+        logger.info(f"🏭 TOTAL FBS INCLUSION SUMMARY:")
+        logger.info(f"   - FBS warehouses: {total_fbs_warehouses}")
+        logger.info(f"   - FBS total stock: {total_fbs_stock}")
+        logger.info(f"   - FBS total orders: {total_fbs_orders}")
+        
+        if total_fbs_warehouses == 0:
+            logger.warning(f"⚠️ WARNING: No FBS warehouses found! This may indicate data loss.")
+
+    @staticmethod
+    def validate_warehouse_orders_accuracy(orders_data: List[Dict[str, Any]], 
+                                         nm_id: int, 
+                                         calculated_breakdown: Dict[str, int]) -> Dict[str, Any]:
+        """
+        Валидация точности распределения заказов по складам.
+        
+        Проверяет что сумма заказов по складам точно соответствует 
+        общему количеству заказов для товара.
+        
+        Args:
+            orders_data: Сырые данные заказов
+            nm_id: ID товара для проверки
+            calculated_breakdown: Рассчитанное распределение по складам
+            
+        Returns:
+            Отчет о точности распределения
+        """
+        # Подсчет общего количества заказов для nmId
+        total_orders_actual = sum(
+            1 for order in orders_data 
+            if order.get("nmId") == nm_id and not order.get("isCancel", False)
+        )
+        
+        # Сумма заказов по складам
+        total_orders_calculated = sum(calculated_breakdown.values())
+        
+        # Подсчет заказов по типам складов
+        fbs_orders = 0
+        wb_orders = 0
+        
+        for order in orders_data:
+            if order.get("nmId") == nm_id and not order.get("isCancel", False):
+                warehouse_type = order.get("warehouseType", "")
+                if warehouse_type == "Склад продавца":
+                    fbs_orders += 1
+                else:
+                    wb_orders += 1
+        
+        validation = {
+            "nm_id": nm_id,
+            "total_actual": total_orders_actual,
+            "total_calculated": total_orders_calculated,
+            "difference": abs(total_orders_actual - total_orders_calculated),
+            "is_accurate": total_orders_actual == total_orders_calculated,
+            "accuracy_percent": (min(total_orders_actual, total_orders_calculated) / 
+                               max(total_orders_actual, total_orders_calculated) * 100) 
+                               if max(total_orders_actual, total_orders_calculated) > 0 else 100,
+            "warehouse_breakdown": calculated_breakdown,
+            "order_type_breakdown": {
+                "fbs_orders": fbs_orders,
+                "wb_orders": wb_orders,
+                "total": fbs_orders + wb_orders
+            }
+        }
+        
+        if not validation["is_accurate"]:
+            logger.error(f"❌ ACCURACY ERROR for nmId {nm_id}:")
+            logger.error(f"   Expected: {total_orders_actual} orders")
+            logger.error(f"   Calculated: {total_orders_calculated} orders") 
+            logger.error(f"   Difference: {validation['difference']}")
+            logger.error(f"   FBS orders: {fbs_orders}, WB orders: {wb_orders}")
+            logger.error(f"   Warehouse breakdown: {calculated_breakdown}")
+        else:
+            logger.info(f"✅ ACCURACY VALIDATED for nmId {nm_id}: {total_orders_actual} orders")
+            logger.info(f"   FBS: {fbs_orders}, WB: {wb_orders}")
+        
+        return validation
 
 
 class TurnoverCalculator:

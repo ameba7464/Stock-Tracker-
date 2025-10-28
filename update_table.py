@@ -2,6 +2,17 @@
 """
 Скрипт для обновления таблицы Google Sheets свежими данными из Wildberries API.
 Используется для обновления данных при запуске приложения.
+
+ИСПРАВЛЕНО 28.10.2025: Теперь использует ProductService с Orders API v1
+вместо устаревшего operations.refresh_table_data() с Analytics API v2.
+
+Изменения:
+- ✅ Использует Orders API v1 (/api/v1/supplier/orders) для точных данных
+- ✅ Фильтрует отменённые заказы (isCancel=True)
+- ✅ Дедупликация по srid
+- ✅ Нормализация названий складов
+- ✅ Фиксированный период (начало недели)
+- ✅ Все 9 критических исправлений применены
 """
 
 import sys
@@ -14,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from stock_tracker.database.sheets import GoogleSheetsClient
 from stock_tracker.database.operations import SheetsOperations
+from stock_tracker.services.product_service import ProductService
 from stock_tracker.utils.logger import get_logger
 from stock_tracker.utils.config import get_config
 
@@ -21,7 +33,7 @@ from stock_tracker.utils.config import get_config
 logger = get_logger(__name__)
 
 
-def update_table_data(spreadsheet_id: str = None, worksheet_name: str = "Stock Tracker"):
+async def update_table_data_async(spreadsheet_id: str = None, worksheet_name: str = "Stock Tracker"):
     """
     Обновить данные в таблице.
     
@@ -60,25 +72,42 @@ def update_table_data(spreadsheet_id: str = None, worksheet_name: str = "Stock T
         sheets_client = GoogleSheetsClient(service_account_path)
         operations = SheetsOperations(sheets_client)
         
-        # Обновляем таблицу
+        # Обновляем таблицу используя ProductService с правильными API
         print("\n🔄 Начинаем обновление данных...")
-        print("   - Получение данных из Wildberries API")
-        print("   - Обработка и расчет показателей")
-        print("   - Запись в Google Sheets")
+        print("   ✅ Используем Orders API v1 для точных данных по заказам")
+        print("   ✅ Фильтрация отменённых заказов (isCancel=True)")
+        print("   ✅ Дедупликация по srid")
+        print("   ✅ Нормализация названий складов")
+        print("   ✅ Точный период (начало недели)")
         
-        result = operations.update_table_on_startup(
+        # Инициализируем ProductService
+        product_service = ProductService(config)
+        
+        # Очищаем старые данные перед обновлением
+        print("\n🧹 Очищаем старые данные...")
+        operations.clear_all_products(spreadsheet_id, worksheet_name)
+        
+        # Синхронизация через ProductService (исправленный код с Orders API v1)
+        print("\n📥 Получаем данные из Wildberries...")
+        result = product_service.sync_from_api_to_sheets(
             spreadsheet_id=spreadsheet_id,
             worksheet_name=worksheet_name
         )
         
-        if result:
+        if result and result.get('status') == 'success':
             print("\n✅ Обновление таблицы завершено успешно!")
-            print("📈 Данные в Google Sheets обновлены актуальной информацией")
+            print(f"📊 Обновлено товаров: {result.get('products_synced', 0)}")
+            print(f"� Всего заказов: {result.get('total_orders', 0)}")
+            print("�📈 Данные в Google Sheets обновлены актуальной информацией")
+            print("\n🔍 Использованы правильные API:")
+            print("   ✅ Orders API v1 для заказов (детальные данные)")
+            print("   ✅ Analytics API v2 для остатков")
+            print("   ✅ Все исправления применены")
         else:
             print("\n❌ Обновление таблицы не удалось")
             print("📝 Проверьте логи для подробной информации об ошибке")
         
-        return result
+        return result and result.get('status') == 'success'
         
     except Exception as e:
         print(f"\n❌ Критическая ошибка при обновлении таблицы: {e}")

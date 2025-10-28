@@ -98,7 +98,7 @@ class SheetsOperations:
                 worksheet = spreadsheet.add_worksheet(
                     title=worksheet_name,
                     rows=1000,  # Start with 1000 rows
-                    cols=8      # 8 columns as defined in structure
+                    cols=10      # 10 columns (added FBO/FBS columns I and J)
                 )
                 
                 # Initialize structure
@@ -614,12 +614,16 @@ class SheetsOperations:
                 logger.info("No products to clear")
                 return 0
             
-            # Clear data range (keep headers in row 1)
+            # ИСПРАВЛЕНО 28.10.2025: Удаляем строки вместо очистки содержимого
+            # batch_clear оставляет пустые строки, что приводит к записи данных 
+            # с неправильной позиции (например строка 36 вместо строки 2)
             if len(all_data) > 1:
-                clear_range = f"A2:H{len(all_data)}"
-                worksheet.batch_clear([clear_range])
+                # Удаляем все строки с данными (строки 2 и далее)
+                # delete_rows удаляет строки физически, а не просто очищает
+                num_rows_to_delete = len(all_data) - 1  # Все кроме заголовка
+                worksheet.delete_rows(2, num_rows_to_delete + 1)  # delete_rows(start, end)
             
-            logger.info(f"Cleared {product_count} products")
+            logger.info(f"Cleared {product_count} products (deleted rows 2-{len(all_data)})")
             return product_count
             
         except Exception as e:
@@ -627,7 +631,8 @@ class SheetsOperations:
             raise SyncError(f"Product clear failed: {e}")
     
     def create_or_update_product(self, spreadsheet_id: str, product: Product,
-                                worksheet_name: str = "Stock Tracker") -> bool:
+                                worksheet_name: str = "Stock Tracker",
+                                skip_existence_check: bool = False) -> bool:
         """
         Create a new product or update existing one.
         
@@ -638,11 +643,22 @@ class SheetsOperations:
             spreadsheet_id: Google Spreadsheet ID
             product: Product data to create/update
             worksheet_name: Worksheet name (default: "Stock Tracker")
+            skip_existence_check: Skip existence check and directly create product.
+                                 Useful after clear_all_products() to avoid unnecessary API calls.
             
         Returns:
             True if successful, False otherwise
         """
         try:
+            # If skip_existence_check is True, directly create the product
+            if skip_existence_check:
+                logger.debug(f"Creating product (skipping existence check): {product.seller_article}")
+                return self.create_product(
+                    spreadsheet_id=spreadsheet_id,
+                    product=product,
+                    worksheet_name=worksheet_name
+                )
+            
             # Try to read existing product
             existing_product = self.read_product(spreadsheet_id, product.seller_article, worksheet_name)
             
