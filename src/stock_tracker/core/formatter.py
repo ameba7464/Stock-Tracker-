@@ -89,6 +89,9 @@ class ProductDataFormatter:
         This ensures that warehouse names, orders, and stock data are properly
         aligned in their respective columns using newline separation.
         
+        УЛУЧШЕНО 30.10.2025: Добавлено визуальное разделение между складами
+        для улучшения читаемости в Google Sheets.
+        
         Args:
             warehouses: List of Warehouse objects in desired order
             
@@ -109,12 +112,13 @@ class ProductDataFormatter:
                 orders.append(str(warehouse.orders))
                 stock.append(str(warehouse.stock))
             
-            # Join with newlines for multi-line cells
-            names_str = "\n".join(names)
-            orders_str = "\n".join(orders)
-            stock_str = "\n".join(stock)
+            # УЛУЧШЕНО: Join с двойным переносом строки для визуального разделения
+            # Это создаёт пустую строку между складами в Google Sheets
+            names_str = "\n\n".join(names)
+            orders_str = "\n\n".join(orders)
+            stock_str = "\n\n".join(stock)
             
-            logger.debug(f"Formatted {len(warehouses)} warehouses with synchronized data")
+            logger.debug(f"Formatted {len(warehouses)} warehouses with synchronized data and visual separation")
             return names_str, orders_str, stock_str
             
         except Exception as e:

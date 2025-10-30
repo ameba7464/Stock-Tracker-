@@ -207,28 +207,34 @@ class Product:
         """
         Get warehouse names formatted for Google Sheets (newline separated).
         
+        УЛУЧШЕНО 30.10.2025: Добавлено визуальное разделение между складами.
+        
         Returns:
-            Warehouse names joined with newlines for multi-line cell display
+            Warehouse names joined with double newlines for visual separation
         """
-        return "\n".join(warehouse.name for warehouse in self.warehouses)
+        return "\n\n".join(warehouse.name for warehouse in self.warehouses)
     
     def get_warehouse_orders(self) -> str:
         """
         Get warehouse orders formatted for Google Sheets (newline separated).
         
+        УЛУЧШЕНО 30.10.2025: Добавлено визуальное разделение между складами.
+        
         Returns:
-            Warehouse orders joined with newlines for multi-line cell display
+            Warehouse orders joined with double newlines for visual separation
         """
-        return "\n".join(str(warehouse.orders) for warehouse in self.warehouses)
+        return "\n\n".join(str(warehouse.orders) for warehouse in self.warehouses)
     
     def get_warehouse_stock(self) -> str:
         """
         Get warehouse stock formatted for Google Sheets (newline separated).
         
+        УЛУЧШЕНО 30.10.2025: Добавлено визуальное разделение между складами.
+        
         Returns:
-            Warehouse stock joined with newlines for multi-line cell display
+            Warehouse stock joined with double newlines for visual separation
         """
-        return "\n".join(str(warehouse.stock) for warehouse in self.warehouses)
+        return "\n\n".join(str(warehouse.stock) for warehouse in self.warehouses)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""

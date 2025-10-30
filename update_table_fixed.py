@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Скрипт для обновления таблицы Google Sheets свежими данными из Wildberries API.
 Используется для обновления данных при запуске приложения.
@@ -22,6 +23,12 @@ import sys
 import os
 import asyncio
 from datetime import datetime
+
+# Установка кодировки UTF-8 для вывода в консоль Windows
+if sys.platform == 'win32':
+    import codecs
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
 # Добавляем путь к модулям
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))

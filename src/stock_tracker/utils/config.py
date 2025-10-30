@@ -84,7 +84,7 @@ class GoogleSheetsConfig(BaseModel):
     
     service_account_key_path: str = Field(..., description="Path to service account JSON key")
     sheet_id: str = Field(..., description="Google Sheet ID")
-    sheet_name: str = Field(default="Sheet1", description="Sheet name/tab")
+    sheet_name: str = Field(default="Stock Tracker", description="Sheet name/tab")
     batch_size: int = Field(default=100, description="Batch size for operations")
     
     if PYDANTIC_V2:
@@ -216,7 +216,7 @@ class StockTrackerConfig(BaseSettings):
     
     google_service_account_key_path: str = Field(..., env="GOOGLE_SERVICE_ACCOUNT_KEY_PATH")
     google_sheet_id: str = Field(..., env="GOOGLE_SHEET_ID")
-    google_sheet_name: str = Field(default="Sheet1", env="GOOGLE_SHEET_NAME")
+    google_sheet_name: str = Field(default="Stock Tracker", env="GOOGLE_SHEET_NAME")
     google_sheets_batch_size: int = Field(default=100, env="GOOGLE_SHEETS_BATCH_SIZE")
     
     log_level: str = Field(default="INFO", env="LOG_LEVEL")

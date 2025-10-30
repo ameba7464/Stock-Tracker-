@@ -25,6 +25,7 @@ from stock_tracker.services.dual_api_stock_fetcher import DualAPIStockFetcher
 from stock_tracker.utils.config import get_config
 from stock_tracker.utils.logger import get_logger
 from stock_tracker.utils.exceptions import SyncError, ValidationError, APIError
+from stock_tracker.utils.warehouse_mapper import normalize_warehouse_name
 
 
 # Module constants
@@ -547,21 +548,26 @@ class ProductService:
                     warehouse_stocks = {}  # warehouse_name -> stock
                     
                     # Process FBO warehouses (from Statistics API)
+                    # ИСПРАВЛЕНО 30.10.2025: Включать ВСЕ склады, даже с qty=0
+                    # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ 30.10.2025: Использовать quantityFull вместо quantity
                     for fbo_detail in stock_data.get('fbo_details', []):
-                        wh_name = fbo_detail.get('warehouseName')
-                        qty = fbo_detail.get('quantity', 0)
+                        wh_name_raw = fbo_detail.get('warehouseName')
+                        qty = fbo_detail.get('quantityFull', 0)  # CRITICAL FIX: Statistics API uses 'quantityFull', not 'quantity'
                         
-                        if wh_name and qty > 0:
+                        if wh_name_raw:  # CRITICAL FIX: Убрали проверку qty > 0
+                            wh_name = normalize_warehouse_name(wh_name_raw)  # НОРМАЛИЗАЦИЯ ДЛЯ ДЕДУПЛИКАЦИИ
                             if wh_name not in warehouse_stocks:
                                 warehouse_stocks[wh_name] = 0
                             warehouse_stocks[wh_name] += qty
                     
                     # Process FBS warehouses (from Marketplace API v3)
+                    # ИСПРАВЛЕНО 30.10.2025: Включать ВСЕ склады, даже с qty=0
                     for fbs_detail in stock_data.get('fbs_details', []):
-                        wh_name = fbs_detail.get('warehouse_name')
+                        wh_name_raw = fbs_detail.get('warehouse_name')
                         qty = fbs_detail.get('amount', 0)
                         
-                        if wh_name and qty > 0:
+                        if wh_name_raw:  # CRITICAL FIX: Убрали проверку qty > 0
+                            wh_name = normalize_warehouse_name(wh_name_raw)  # НОРМАЛИЗАЦИЯ ДЛЯ ДЕДУПЛИКАЦИИ
                             if wh_name not in warehouse_stocks:
                                 warehouse_stocks[wh_name] = 0
                             warehouse_stocks[wh_name] += qty
@@ -570,8 +576,9 @@ class ProductService:
                     warehouse_orders = {}
                     for order in orders_data:
                         if order.get('nmId') == nm_id:
-                            wh_name = order.get('warehouseName', '').strip()
-                            if wh_name:
+                            wh_name_raw = order.get('warehouseName', '').strip()
+                            if wh_name_raw:
+                                wh_name = normalize_warehouse_name(wh_name_raw)  # НОРМАЛИЗАЦИЯ ДЛЯ ДЕДУПЛИКАЦИИ
                                 warehouse_orders[wh_name] = warehouse_orders.get(wh_name, 0) + 1
                     
                     # Create Warehouse objects
@@ -605,9 +612,13 @@ class ProductService:
                         last_updated=datetime.now()
                     )
                     
-                    # Calculate turnover if we have stock and orders
-                    if product.total_stock > 0 and product.total_orders > 0:
-                        product.turnover = round(product.total_orders / product.total_stock, 2)
+                    # Calculate turnover (оборачиваемость в днях)
+                    # ИСПРАВЛЕНО 30.10.2025: Правильная формула с учетом периода
+                    # Формула: остатки / (заказы_за_период / количество_дней_в_периоде)
+                    # Показывает сколько дней товар будет продаваться при текущем темпе
+                    if product.total_orders > 0:
+                        orders_per_day = product.total_orders / ORDER_LOOKBACK_DAYS
+                        product.turnover = round(product.total_stock / orders_per_day, 3)
                     else:
                         product.turnover = 0.0
                     
@@ -921,10 +932,13 @@ class ProductService:
         else:
             logger.warning("Warehouse classifier not initialized, FBO/FBS stock breakdown unavailable")
         
-        # Calculate turnover rate - FIXED: Use real warehouse stock
-        turnover_rate = 0.0
-        if real_warehouse_stock > 0 and total_orders > 0:
-            turnover_rate = total_orders / real_warehouse_stock
+        # Calculate turnover (оборачиваемость = остатки / заказы)
+        # Показывает соотношение остатков к заказам (целое число)
+        turnover_rate = 0
+        if total_orders > 0:
+            turnover_rate = int(real_warehouse_stock / total_orders)
+        else:
+            turnover_rate = 0
         
         # ИСПРАВЛЕНО 26.10.2025: Убран несуществующий параметр wb_article (дубликат wildberries_article)
         # ИСПРАВЛЕНО: Убран несуществующий параметр turnover_rate (используется turnover)

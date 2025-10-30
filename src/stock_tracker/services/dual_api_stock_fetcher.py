@@ -6,6 +6,7 @@ import requests
 from typing import Dict, List, Tuple
 from datetime import datetime, timedelta
 from stock_tracker.utils.config import get_config
+from stock_tracker.utils.warehouse_mapper import normalize_warehouse_name
 
 
 class DualAPIStockFetcher:
@@ -84,7 +85,11 @@ class DualAPIStockFetcher:
         
         for warehouse in warehouses:
             wh_id = warehouse.get('id')
-            wh_name = warehouse.get('name')
+            wh_name_raw = warehouse.get('name')
+            
+            # КРИТИЧЕСКИ ВАЖНО: Нормализуем имя склада FBS
+            # API Marketplace v3 возвращает "Fulllog FBS", нормализуем в "Маркетплейс"
+            wh_name = normalize_warehouse_name(wh_name_raw)
             
             url = f"https://marketplace-api.wildberries.ru/api/v3/stocks/{wh_id}"
             body = {"skus": barcodes}
@@ -104,7 +109,7 @@ class DualAPIStockFetcher:
                     }
             
             except Exception as e:
-                print(f"Error fetching FBS stocks for warehouse {wh_name} ({wh_id}): {e}")
+                print(f"Error fetching FBS stocks for warehouse {wh_name_raw} -> {wh_name} ({wh_id}): {e}")
         
         return result
     
@@ -135,8 +140,10 @@ class DualAPIStockFetcher:
         fbo_stocks = self.get_fbo_stocks()
         
         # Step 2: Filter by article if needed
+        # ВАЖНО: Используем startswith для учета всех вариантов артикула
+        # (например, ItsSport2/50g, ItsSport2/50g+Aks5/20g, ItsSport2/50g+Aks5/20g.FBS)
         if supplier_article:
-            fbo_stocks = [s for s in fbo_stocks if s.get('supplierArticle') == supplier_article]
+            fbo_stocks = [s for s in fbo_stocks if s.get('supplierArticle', '').startswith(supplier_article)]
         
         # Step 3: Extract unique barcodes
         barcodes = list(set(s.get('barcode') for s in fbo_stocks if s.get('barcode')))
@@ -144,17 +151,28 @@ class DualAPIStockFetcher:
         # Step 4: Get FBS stocks for these barcodes
         fbs_stocks_by_warehouse = self.get_fbs_stocks(barcodes)
         
-        # Step 5: Aggregate by supplier article
+        # Step 5: Aggregate by BASE supplier article (without variants)
+        # ВАЖНО: Все варианты (ItsSport2/50g, ItsSport2/50g+Aks5/20g, ItsSport2/50g+Aks5/20g.FBS)
+        # объединяются в одну запись под базовым артикулом
         result = {}
+        
+        # Если был указан supplier_article для фильтрации, используем его как базовый ключ
+        # Иначе каждый supplierArticle будет отдельной записью
+        base_article_key = supplier_article if supplier_article else None
         
         for record in fbo_stocks:
             article = record.get('supplierArticle')
             if not article:
                 continue
             
-            if article not in result:
-                result[article] = {
-                    'supplier_article': article,
+            # Определяем ключ для группировки:
+            # - Если фильтровали по конкретному артикулу - все идет под этим ключом
+            # - Если нет - каждый supplierArticle - отдельная запись
+            group_key = base_article_key if base_article_key else article
+            
+            if group_key not in result:
+                result[group_key] = {
+                    'supplier_article': group_key,
                     'nm_id': record.get('nmId'),
                     'barcodes': set(),
                     'fbo_stock': 0,
@@ -167,11 +185,11 @@ class DualAPIStockFetcher:
             # Add barcode
             barcode = record.get('barcode')
             if barcode:
-                result[article]['barcodes'].add(barcode)
+                result[group_key]['barcodes'].add(barcode)
             
-            # Add FBO stock
-            result[article]['fbo_stock'] += record.get('quantity', 0)
-            result[article]['fbo_details'].append(record)
+            # Add FBO stock (ВАЖНО: в Statistics API поле называется 'quantityFull', а не 'quantity')
+            result[group_key]['fbo_stock'] += record.get('quantityFull', 0)
+            result[group_key]['fbo_details'].append(record)
         
         # Add FBS stocks
         for wh_data in fbs_stocks_by_warehouse.values():
@@ -231,55 +249,55 @@ def test_dual_api():
     fetcher = DualAPIStockFetcher(config.wildberries_api_key)
     
     print("\n" + "="*100)
-    print("🧪 ТЕСТ: Dual API Stock Fetcher")
+    print("TEST: Dual API Stock Fetcher")
     print("="*100)
     
     # Test 1: Get summary
-    print("\n📊 Тест 1: Получение общей статистики...")
+    print("\nTest 1: Getting summary...")
     summary = fetcher.get_all_stocks_summary()
     
-    print(f"✅ Общая статистика:")
-    print(f"  - FBO остатков: {summary['total_fbo']} шт")
-    print(f"  - FBS остатков: {summary['total_fbs']} шт")
-    print(f"  - ВСЕГО: {summary['total']} шт")
-    print(f"  - Артикулов: {summary['articles_count']}")
-    print(f"  - FBS складов: {summary['fbs_warehouses_count']}")
+    print("Overall summary:")
+    print(f"  - FBO stocks: {summary['total_fbo']} pcs")
+    print(f"  - FBS stocks: {summary['total_fbs']} pcs")
+    print(f"  - TOTAL: {summary['total']} pcs")
+    print(f"  - Articles: {summary['articles_count']}")
+    print(f"  - FBS warehouses: {summary['fbs_warehouses_count']}")
     
     # Test 2: Get specific article
-    print("\n📦 Тест 2: Получение данных для Its1_2_3/50g...")
+    print("\nTest 2: Getting data for Its1_2_3/50g...")
     stocks = fetcher.get_combined_stocks_by_article('Its1_2_3/50g')
     
     if 'Its1_2_3/50g' in stocks:
         data = stocks['Its1_2_3/50g']
         
-        print(f"✅ Its1_2_3/50g:")
+        print("Its1_2_3/50g:")
         print(f"  - NM ID: {data['nm_id']}")
-        print(f"  - Баркодов: {len(data['barcodes'])}")
-        print(f"  - FBO остаток: {data['fbo_stock']} шт ({len(data['fbo_details'])} записей)")
-        print(f"  - FBS остаток: {data['fbs_stock']} шт ({len(data['fbs_details'])} записей)")
-        print(f"  - ИТОГО: {data['total_stock']} шт")
+        print(f"  - Barcodes: {len(data['barcodes'])}")
+        print(f"  - FBO stock: {data['fbo_stock']} pcs ({len(data['fbo_details'])} records)")
+        print(f"  - FBS stock: {data['fbs_stock']} pcs ({len(data['fbs_details'])} records)")
+        print(f"  - TOTAL: {data['total_stock']} pcs")
         
-        print(f"\n  Баркоды: {data['barcodes']}")
+        print(f"\n  Barcodes: {data['barcodes']}")
         
-        print(f"\n  FBO склады:")
+        print(f"\n  FBO warehouses:")
         for detail in data['fbo_details'][:5]:
             wh = detail.get('warehouseName')
             qty = detail.get('quantity', 0)
-            print(f"    - {wh}: {qty} шт")
+            print(f"    - {wh}: {qty} pcs")
         
         if len(data['fbo_details']) > 5:
-            print(f"    ... и еще {len(data['fbo_details']) - 5}")
+            print(f"    ... and {len(data['fbo_details']) - 5} more")
         
-        print(f"\n  FBS склады:")
+        print(f"\n  FBS warehouses:")
         for detail in data['fbs_details']:
             wh = detail.get('warehouse_name')
             qty = detail.get('amount', 0)
-            print(f"    - {wh}: {qty} шт")
+            print(f"    - {wh}: {qty} pcs")
     else:
-        print("❌ Its1_2_3/50g не найден")
+        print("Its1_2_3/50g not found")
     
     print("\n" + "="*100)
-    print("✅ ТЕСТ ЗАВЕРШЕН")
+    print("TEST COMPLETED")
     print("="*100)
 
 
