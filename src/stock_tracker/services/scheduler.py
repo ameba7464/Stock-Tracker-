@@ -29,7 +29,7 @@ from stock_tracker.services.triggers import RecalculationTriggerManager
 from stock_tracker.services.batch_processor import MultiWarehouseBatchProcessor
 from stock_tracker.core.models import Product
 from stock_tracker.utils.logger import get_logger
-from stock_tracker.utils.exceptions import SchedulingError
+from stock_tracker.utils.exceptions import StockTrackerError
 
 logger = get_logger(__name__)
 
@@ -196,7 +196,7 @@ class SchedulingService:
             
         except Exception as e:
             logger.error(f"Failed to start scheduler: {e}")
-            raise SchedulingError(f"Scheduler start failed: {e}")
+            raise StockTrackerError(f"Scheduler start failed: {e}")
     
     async def stop_scheduler(self):
         """Stop the scheduling service."""
@@ -215,7 +215,7 @@ class SchedulingService:
             
         except Exception as e:
             logger.error(f"Failed to stop scheduler: {e}")
-            raise SchedulingError(f"Scheduler stop failed: {e}")
+            raise StockTrackerError(f"Scheduler stop failed: {e}")
     
     async def add_scheduled_job(self, schedule_config: ScheduleConfig):
         """
@@ -233,7 +233,7 @@ class SchedulingService:
             job_func = self._get_job_function(schedule_config.job_id)
             
             if not job_func:
-                raise SchedulingError(f"No function mapped for job: {schedule_config.job_id}")
+                raise StockTrackerError(f"No function mapped for job: {schedule_config.job_id}")
             
             # Create trigger
             if schedule_config.schedule_type == "cron":
@@ -241,7 +241,7 @@ class SchedulingService:
             elif schedule_config.schedule_type == "interval":
                 trigger = IntervalTrigger(**schedule_config.schedule_params)
             else:
-                raise SchedulingError(f"Unsupported schedule type: {schedule_config.schedule_type}")
+                raise StockTrackerError(f"Unsupported schedule type: {schedule_config.schedule_type}")
             
             # Add job to scheduler
             self.scheduler.add_job(
@@ -260,7 +260,7 @@ class SchedulingService:
             
         except Exception as e:
             logger.error(f"Failed to add scheduled job {schedule_config.job_id}: {e}")
-            raise SchedulingError(f"Failed to add job: {e}")
+            raise StockTrackerError(f"Failed to add job: {e}")
     
     def _get_job_function(self, job_id: str) -> Optional[Callable]:
         """

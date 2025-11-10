@@ -16,10 +16,10 @@ from enum import Enum
 
 from stock_tracker.core.calculator import AutomaticAggregator
 from stock_tracker.core.models import Product, Warehouse
-from stock_tracker.database.operations import GoogleSheetsOperations
+from stock_tracker.database.operations import SheetsOperations
 from stock_tracker.services.sync import DataSynchronizationService
 from stock_tracker.utils.logger import get_logger
-from stock_tracker.utils.exceptions import TriggerError
+from stock_tracker.utils.exceptions import DataSyncError
 
 logger = get_logger(__name__)
 
@@ -57,7 +57,7 @@ class RecalculationTriggerManager:
     """
     
     def __init__(self, sync_service: DataSynchronizationService,
-                 sheets_operations: GoogleSheetsOperations):
+                 sheets_operations: SheetsOperations):
         """
         Initialize trigger manager.
         
@@ -366,7 +366,7 @@ class RecalculationTriggerManager:
             
         except Exception as e:
             logger.error(f"Failed to handle warehouse change triggers: {e}")
-            raise TriggerError(f"Warehouse trigger handling failed: {e}")
+            raise DataSyncError(f"Warehouse trigger handling failed: {e}")
     
     async def _handle_order_change_trigger(self, triggers: List[TriggerEvent]) -> Dict[str, Any]:
         """
@@ -404,7 +404,7 @@ class RecalculationTriggerManager:
             
         except Exception as e:
             logger.error(f"Failed to handle order change triggers: {e}")
-            raise TriggerError(f"Order trigger handling failed: {e}")
+            raise DataSyncError(f"Order trigger handling failed: {e}")
     
     async def _handle_periodic_sync_trigger(self, triggers: List[TriggerEvent]) -> Dict[str, Any]:
         """
@@ -437,7 +437,7 @@ class RecalculationTriggerManager:
             
         except Exception as e:
             logger.error(f"Failed to handle periodic sync triggers: {e}")
-            raise TriggerError(f"Periodic sync trigger handling failed: {e}")
+            raise DataSyncError(f"Periodic sync trigger handling failed: {e}")
     
     async def _handle_manual_trigger(self, triggers: List[TriggerEvent]) -> Dict[str, Any]:
         """
@@ -457,7 +457,7 @@ class RecalculationTriggerManager:
             
         except Exception as e:
             logger.error(f"Failed to handle manual triggers: {e}")
-            raise TriggerError(f"Manual trigger handling failed: {e}")
+            raise DataSyncError(f"Manual trigger handling failed: {e}")
     
     async def _handle_validation_failure_trigger(self, triggers: List[TriggerEvent]) -> Dict[str, Any]:
         """
@@ -488,7 +488,7 @@ class RecalculationTriggerManager:
             
         except Exception as e:
             logger.error(f"Failed to handle validation failure triggers: {e}")
-            raise TriggerError(f"Validation failure trigger handling failed: {e}")
+            raise DataSyncError(f"Validation failure trigger handling failed: {e}")
     
     async def _get_products_by_ids(self, product_ids: List[str]) -> List[Product]:
         """

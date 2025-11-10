@@ -98,7 +98,7 @@ class SheetsOperations:
                 worksheet = spreadsheet.add_worksheet(
                     title=worksheet_name,
                     rows=1000,  # Start with 1000 rows
-                    cols=10      # 10 columns (added FBO/FBS columns I and J)
+                    cols=9       # 9 columns (A-I)
                 )
                 
                 # Initialize structure
@@ -123,7 +123,7 @@ class SheetsOperations:
             
             if headers != expected_headers:
                 logger.info("Updating worksheet headers")
-                worksheet.update('A1:H1', [expected_headers])
+                worksheet.update('A1:I1', [expected_headers])
                 
         except Exception as e:
             logger.warning(f"Could not verify worksheet structure: {e}")
@@ -138,7 +138,7 @@ class SheetsOperations:
         try:
             # Set headers
             headers = self.structure.get_headers()
-            worksheet.update('A1:H1', [headers])
+            worksheet.update('A1:I1', [headers])
             
             # Apply basic formatting
             self.structure.apply_header_formatting(worksheet)
@@ -245,7 +245,7 @@ class SheetsOperations:
                 # Continue anyway, let the actual update fail if needed
             
             # Insert product data
-            range_name = f"A{next_row}:H{next_row}"
+            range_name = f"A{next_row}:I{next_row}"
             worksheet.update(range_name, [row_data])
             
             logger.info(f"Created product {product.seller_article} at row {next_row}")
@@ -319,7 +319,7 @@ class SheetsOperations:
                 logger.warning(f"Could not ensure sheet capacity for batch: {capacity_error}")
             
             # Batch update
-            range_name = f"A{start_row}:H{end_row}"
+            range_name = f"A{start_row}:I{end_row}"
             worksheet.update(range_name, batch_data)
             
             created_rows = list(range(start_row, end_row + 1))
@@ -504,7 +504,7 @@ class SheetsOperations:
             row_data = self.formatter.format_product_for_sheets(updated_product)
             
             # Update row
-            range_name = f"A{row_number}:H{row_number}"
+            range_name = f"A{row_number}:I{row_number}"
             worksheet.update(range_name, [row_data])
             
             logger.info(f"Updated product {seller_article} at row {row_number}")
@@ -1105,7 +1105,7 @@ class SheetsOperations:
             ranges = []
             for start_row in range(2, total_rows + 1, chunk_size):
                 end_row = min(start_row + chunk_size - 1, total_rows)
-                range_name = f"{worksheet_name}!A{start_row}:H{end_row}"
+                range_name = f"{worksheet_name}!A{start_row}:I{end_row}"
                 ranges.append(range_name)
             
             # Use optimized batch reading
@@ -1208,7 +1208,7 @@ class SheetsOperations:
                 batch_start_row = start_row + i
                 batch_end_row = batch_start_row + len(batch_rows) - 1
                 
-                range_name = f"{worksheet_name}!A{batch_start_row}:H{batch_end_row}"
+                range_name = f"{worksheet_name}!A{batch_start_row}:I{batch_end_row}"
                 range_data[range_name] = batch_rows
             
             # Execute optimized batch write
@@ -1282,7 +1282,7 @@ class SheetsOperations:
                         row_number = existing_index[product.seller_article]
                         row_data = self.formatter.product_to_row(product)
                         
-                        range_name = f"{worksheet_name}!A{row_number}:H{row_number}"
+                        range_name = f"{worksheet_name}!A{row_number}:I{row_number}"
                         range_data[range_name] = [row_data]
                         
                         stats["updated"] += 1

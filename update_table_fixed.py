@@ -30,12 +30,18 @@ if sys.platform == 'win32':
     sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
     sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
+# ИСПРАВЛЕНИЕ 10.11.2025: Меняем рабочую директорию на директорию скрипта
+# Это необходимо для корректной загрузки .env файла
+script_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(script_dir)
+
 # Добавляем путь к модулям
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+sys.path.insert(0, os.path.join(script_dir, 'src'))
 
 from stock_tracker.database.sheets import GoogleSheetsClient
 from stock_tracker.database.operations import SheetsOperations
 from stock_tracker.services.product_service import ProductService
+from stock_tracker.core.models import SyncStatus
 from stock_tracker.utils.logger import get_logger
 from stock_tracker.utils.config import get_config
 
@@ -50,10 +56,20 @@ async def update_table_data_async(spreadsheet_id: str = None, worksheet_name: st
     Args:
         spreadsheet_id: ID Google Sheets документа (если None, будет взят из конфига)
         worksheet_name: Название листа для обновления
+        
+    Returns:
+        True если обновление успешно, False иначе
     """
     try:
         print("🚀 Запуск обновления таблицы Stock Tracker")
         print(f"📅 Время запуска: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Проверяем, запущены ли мы в GitHub Actions
+        is_github_actions = os.getenv('GITHUB_ACTIONS') == 'true'
+        if is_github_actions:
+            print("🤖 Обнаружен запуск в GitHub Actions")
+            print(f"   Workflow: {os.getenv('GITHUB_WORKFLOW')}")
+            print(f"   Runner: {os.getenv('RUNNER_OS')}")
         
         # Загружаем конфигурацию
         print("📋 Загружаем конфигурацию...")
@@ -73,7 +89,15 @@ async def update_table_data_async(spreadsheet_id: str = None, worksheet_name: st
         
         # Инициализируем клиент Google Sheets
         print("🔐 Подключаемся к Google Sheets...")
-        service_account_path = os.path.join(os.path.dirname(__file__), 'config', 'service-account.json')
+        
+        # Поддержка переменных окружения для GitHub Actions
+        service_account_path_env = os.getenv('GOOGLE_SERVICE_ACCOUNT_KEY_PATH')
+        if service_account_path_env:
+            service_account_path = service_account_path_env
+            print(f"   Используем путь из переменной окружения: {service_account_path}")
+        else:
+            service_account_path = os.path.join(os.path.dirname(__file__), 'config', 'service-account.json')
+            print(f"   Используем путь по умолчанию: {service_account_path}")
         
         if not os.path.exists(service_account_path):
             print(f"❌ Ошибка: Файл сервисного аккаунта не найден: {service_account_path}")
@@ -95,19 +119,64 @@ async def update_table_data_async(spreadsheet_id: str = None, worksheet_name: st
         # Инициализируем ProductService
         product_service = ProductService(config)
         
-        # Очищаем старые данные перед обновлением
+        # Очищаем старые данные перед обновлением с повторными попытками
         print("\n🧹 Очищаем старые данные...")
-        operations.clear_all_products(spreadsheet_id, worksheet_name)
+        max_retries = 3
+        retry_delay = 5  # секунд
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                operations.clear_all_products(spreadsheet_id, worksheet_name)
+                print(f"   ✅ Данные очищены")
+                break
+            except Exception as e:
+                if "503" in str(e) or "unavailable" in str(e).lower():
+                    if attempt < max_retries:
+                        print(f"   ⚠️  Попытка {attempt}/{max_retries}: Google Sheets временно недоступен")
+                        print(f"   ⏳ Ожидание {retry_delay} секунд перед повторной попыткой...")
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2  # Увеличиваем задержку для следующей попытки
+                    else:
+                        print(f"   ❌ Не удалось очистить данные после {max_retries} попыток")
+                        raise
+                else:
+                    raise
         
         # Синхронизация через ProductService с Dual API (FBO + FBS)
         # КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ 28.10.2025: Используем Dual API для получения FBS остатков
         # ОПТИМИЗАЦИЯ: skip_existence_check=True после очистки таблицы
         # Экономит ~58% API запросов к Google Sheets (не проверяем существование)
         print("\n📥 Получаем данные из Wildberries (Dual API: FBO + FBS)...")
-        sync_session = await product_service.sync_from_dual_api_to_sheets(skip_existence_check=True)
+        
+        # ИСПРАВЛЕНО 10.11.2025: ProductService.sync_from_dual_api_to_sheets использует
+        # spreadsheet_id из config.google_sheets.sheet_id, поэтому временно заменяем его
+        original_sheet_id = config.google_sheet_id
+        config.google_sheet_id = spreadsheet_id
+        
+        # Синхронизация с повторными попытками при ошибках Google API
+        max_sync_retries = 2
+        sync_retry_delay = 10
+        
+        for attempt in range(1, max_sync_retries + 1):
+            try:
+                sync_session = await product_service.sync_from_dual_api_to_sheets(skip_existence_check=True)
+                break
+            except Exception as e:
+                if "503" in str(e) or "unavailable" in str(e).lower() or "quota" in str(e).lower():
+                    if attempt < max_sync_retries:
+                        print(f"\n   ⚠️  Попытка синхронизации {attempt}/{max_sync_retries} неуспешна")
+                        print(f"   ⏳ Ожидание {sync_retry_delay} секунд...")
+                        await asyncio.sleep(sync_retry_delay)
+                        sync_retry_delay *= 2
+                    else:
+                        raise
+                else:
+                    raise
+            finally:
+                if attempt == max_sync_retries or sync_session:
+                    config.google_sheet_id = original_sheet_id
         
         # Проверяем статус синхронизации (SyncStatus.COMPLETED или status.value == 'completed')
-        from stock_tracker.core.models import SyncStatus
         is_success = sync_session and sync_session.status == SyncStatus.COMPLETED
         
         if is_success:
@@ -115,7 +184,8 @@ async def update_table_data_async(spreadsheet_id: str = None, worksheet_name: st
             print(f"📊 Обработано товаров: {sync_session.products_processed}/{sync_session.products_total}")
             if sync_session.products_failed > 0:
                 print(f"⚠️  Ошибок: {sync_session.products_failed}")
-            print(f"⏱️  Длительность: {sync_session.duration_seconds:.1f} сек")
+            duration = sync_session.duration_seconds if sync_session.duration_seconds is not None else 0.0
+            print(f"⏱️  Длительность: {duration:.1f} сек")
             print("📈 Данные в Google Sheets обновлены актуальной информацией")
             print("\n🔍 Использованы правильные API:")
             print("   ✅ Statistics API для FBO остатков (склады WB)")
@@ -137,7 +207,20 @@ async def update_table_data_async(spreadsheet_id: str = None, worksheet_name: st
         return is_success
         
     except Exception as e:
+        error_msg = str(e)
         print(f"\n❌ Критическая ошибка при обновлении таблицы: {e}")
+        
+        # Специальная обработка для частых ошибок
+        if "503" in error_msg or "unavailable" in error_msg.lower():
+            print("\n💡 Совет: Google Sheets API временно недоступен.")
+            print("   Попробуйте запустить скрипт через несколько минут.")
+        elif "429" in error_msg or "quota" in error_msg.lower():
+            print("\n💡 Совет: Превышена квота API запросов.")
+            print("   Подождите некоторое время перед следующей попыткой.")
+        elif "403" in error_msg or "permission" in error_msg.lower():
+            print("\n💡 Совет: Проблема с правами доступа.")
+            print("   Проверьте, что service account имеет доступ к таблице.")
+        
         logger.error(f"Critical error in table update: {e}")
         import traceback
         traceback.print_exc()

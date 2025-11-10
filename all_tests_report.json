@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-11-08T21:00:30.664537",
+  "summary": {
+    "total_tests": 1,
+    "passed": 0,
+    "failed": 1,
+    "total_duration": 0.118515
+  },
+  "results": [
+    {
+      "script": "test_github_actions.py",
+      "passed": false,
+      "duration": 0.118515,
+      "returncode": 1
+    }
+  ]
+}

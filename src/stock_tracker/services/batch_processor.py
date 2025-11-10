@@ -18,8 +18,8 @@ import json
 from stock_tracker.api.products import WildberriesProductDataFetcher
 from stock_tracker.core.calculator import AutomaticAggregator
 from stock_tracker.core.models import Product, Warehouse
-from stock_tracker.database.operations import GoogleSheetsOperations
-from stock_tracker.core.formatter import GoogleSheetsFormatter
+from stock_tracker.database.operations import SheetsOperations
+from stock_tracker.core.formatter import ProductDataFormatter
 from stock_tracker.utils.logger import get_logger
 from stock_tracker.utils.exceptions import BatchProcessingError, ValidationError
 
@@ -77,7 +77,7 @@ class MultiWarehouseBatchProcessor:
     """
     
     def __init__(self, data_fetcher: WildberriesProductDataFetcher,
-                 sheets_operations: GoogleSheetsOperations,
+                 sheets_operations: SheetsOperations,
                  config: Optional[BatchProcessingConfig] = None):
         """
         Initialize batch processor.
@@ -92,7 +92,7 @@ class MultiWarehouseBatchProcessor:
         self.config = config or BatchProcessingConfig()
         
         self.aggregator = AutomaticAggregator()
-        self.formatter = GoogleSheetsFormatter()
+        self.formatter = ProductDataFormatter()
         
         # Track processing state
         self.active_batches: Dict[str, BatchProcessingResult] = {}

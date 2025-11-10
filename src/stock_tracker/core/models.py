@@ -60,6 +60,7 @@ class Warehouse:
     name: str  # Warehouse name
     stock: int = 0  # Current stock quantity
     orders: int = 0  # Orders count
+    turnover: int = 0  # Turnover rate in days: stock // orders (ИСПРАВЛЕНО 10.11.2025)
     
     # Metadata
     last_sync: Optional[datetime] = None
@@ -74,6 +75,26 @@ class Warehouse:
         
         if self.orders < 0:
             raise ValueError("Orders count cannot be negative")
+        
+        # Calculate turnover if not already set
+        if self.turnover == 0:
+            self.calculate_turnover()
+    
+    def calculate_turnover(self) -> None:
+        """
+        Calculate turnover rate for this warehouse: stock // orders (целое число дней).
+        
+        ИСПРАВЛЕНО 10.11.2025: Изменена формула с orders//stock на stock//orders.
+        Оборачиваемость = сколько дней товар будет продаваться при текущих темпах заказов.
+        
+        Пример: stock=654, orders=32 за неделю → 654//32 = 20 дней
+        
+        Sets to 0 if orders is 0 to avoid division by zero.
+        """
+        if self.orders > 0:
+            self.turnover = self.stock // self.orders
+        else:
+            self.turnover = 0
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""
@@ -81,6 +102,7 @@ class Warehouse:
             "name": self.name,
             "stock": self.stock,
             "orders": self.orders,
+            "turnover": self.turnover,
             "last_sync": self.last_sync.isoformat() if self.last_sync else None
         }
     
@@ -97,12 +119,14 @@ class Warehouse:
         Returns:
             Warehouse instance
         """
-        return cls(
+        warehouse = cls(
             name=name,
             stock=stock,
             orders=orders,
             last_sync=datetime.now()
         )
+        warehouse.calculate_turnover()
+        return warehouse
 
 
 @dataclass
@@ -235,6 +259,18 @@ class Product:
             Warehouse stock joined with double newlines for visual separation
         """
         return "\n\n".join(str(warehouse.stock) for warehouse in self.warehouses)
+    
+    def get_warehouse_turnover(self) -> str:
+        """
+        Get warehouse turnover formatted for Google Sheets (newline separated).
+        
+        ДОБАВЛЕНО 10.11.2025: Новый метод для получения оборачиваемости по складам.
+        ИЗМЕНЕНО 10.11.2025: Оборачиваемость - целое число.
+        
+        Returns:
+            Warehouse turnover joined with double newlines for visual separation
+        """
+        return "\n\n".join(str(warehouse.turnover) for warehouse in self.warehouses)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""

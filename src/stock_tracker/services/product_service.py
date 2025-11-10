@@ -582,17 +582,24 @@ class ProductService:
                                 warehouse_orders[wh_name] = warehouse_orders.get(wh_name, 0) + 1
                     
                     # Create Warehouse objects
+                    # ИСПРАВЛЕНО 09.11.2025: Не добавляем склады с нулевыми остатками И нулевыми заказами
                     for wh_name, stock in warehouse_stocks.items():
+                        orders = warehouse_orders.get(wh_name, 0)
+                        # Пропускаем склады без остатков и заказов (устаревшие данные)
+                        if stock == 0 and orders == 0:
+                            logger.debug(f"Skipping warehouse {wh_name} with zero stock and zero orders")
+                            continue
+                        
                         warehouse = Warehouse(
                             name=wh_name,
                             stock=stock,
-                            orders=warehouse_orders.get(wh_name, 0)
+                            orders=orders
                         )
                         warehouses.append(warehouse)
                     
                     # Add warehouses with orders but no stock
                     for wh_name, orders in warehouse_orders.items():
-                        if wh_name not in warehouse_stocks:
+                        if wh_name not in warehouse_stocks and orders > 0:
                             warehouse = Warehouse(
                                 name=wh_name,
                                 stock=0,

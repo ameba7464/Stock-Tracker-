@@ -58,7 +58,7 @@ class ProductDataFormatter:
                 )
             
             # Format multi-warehouse data with synchronized ordering
-            warehouse_names, warehouse_orders, warehouse_stock = ProductDataFormatter._format_synchronized_warehouse_data(
+            warehouse_names, warehouse_orders, warehouse_stock, warehouse_turnover = ProductDataFormatter._format_synchronized_warehouse_data(
                 product.warehouses
             )
             
@@ -71,7 +71,8 @@ class ProductDataFormatter:
                 int(product.turnover),            # Column E: Оборачиваемость (целое число)
                 warehouse_names,                  # Column F: Название склада (multi-line)
                 warehouse_orders,                 # Column G: Заказы со склада (multi-line)
-                warehouse_stock                   # Column H: Остатки на складе (multi-line)
+                warehouse_stock,                  # Column H: Остатки на складе (multi-line)
+                warehouse_turnover                # Column I: Оборачиваемость по складам (multi-line)
             ]
             
             logger.debug(f"Formatted product {product.seller_article} for sheets with {len(product.warehouses)} warehouses")
@@ -82,48 +83,54 @@ class ProductDataFormatter:
             raise ValidationError(f"Product formatting failed: {e}")
     
     @staticmethod
-    def _format_synchronized_warehouse_data(warehouses: List[Warehouse]) -> Tuple[str, str, str]:
+    def _format_synchronized_warehouse_data(warehouses: List[Warehouse]) -> Tuple[str, str, str, str]:
         """
-        Format warehouse data with synchronized ordering for columns F, G, H.
+        Format warehouse data with synchronized ordering for columns F, G, H, I.
         
-        This ensures that warehouse names, orders, and stock data are properly
+        This ensures that warehouse names, orders, stock and turnover data are properly
         aligned in their respective columns using newline separation.
         
         УЛУЧШЕНО 30.10.2025: Добавлено визуальное разделение между складами
         для улучшения читаемости в Google Sheets.
         
+        ДОБАВЛЕНО 10.11.2025: Добавлена колонка оборачиваемости по складам.
+        
         Args:
             warehouses: List of Warehouse objects in desired order
             
         Returns:
-            Tuple of (names, orders, stock) as multi-line strings
+            Tuple of (names, orders, stock, turnover) as multi-line strings
         """
         if not warehouses:
-            return "", "", ""
+            return "", "", "", ""
         
         try:
             # Extract data in synchronized order
             names = []
             orders = []
             stock = []
+            turnover = []
             
             for warehouse in warehouses:
                 names.append(str(warehouse.name))
                 orders.append(str(warehouse.orders))
                 stock.append(str(warehouse.stock))
+                # Format turnover as integer
+                turnover.append(str(warehouse.turnover))
             
             # УЛУЧШЕНО: Join с двойным переносом строки для визуального разделения
             # Это создаёт пустую строку между складами в Google Sheets
             names_str = "\n\n".join(names)
             orders_str = "\n\n".join(orders)
             stock_str = "\n\n".join(stock)
+            turnover_str = "\n\n".join(turnover)
             
             logger.debug(f"Formatted {len(warehouses)} warehouses with synchronized data and visual separation")
-            return names_str, orders_str, stock_str
+            return names_str, orders_str, stock_str, turnover_str
             
         except Exception as e:
             logger.error(f"Failed to format synchronized warehouse data: {e}")
-            return "", "", ""
+            return "", "", "", ""
     
     @staticmethod
     def format_products_batch(products: List[Product]) -> List[List[Any]]:
@@ -332,10 +339,12 @@ class ProductDataFormatter:
             
             # Parse warehouse data with synchronized ordering
             try:
+                warehouse_turnover = row_data[8] if len(row_data) > 8 else ""
                 warehouses = ProductDataFormatter._parse_synchronized_warehouse_data(
                     row_data[5],  # warehouse names
                     row_data[6],  # warehouse orders
-                    row_data[7]   # warehouse stock
+                    row_data[7],  # warehouse stock
+                    warehouse_turnover  # warehouse turnover
                 )
                 
                 # Add warehouses to product
@@ -354,17 +363,20 @@ class ProductDataFormatter:
     
     @staticmethod
     def _parse_synchronized_warehouse_data(names_cell: str, orders_cell: str, 
-                                         stock_cell: str) -> List[Warehouse]:
+                                         stock_cell: str, turnover_cell: str = "") -> List[Warehouse]:
         """
         Parse synchronized warehouse data from multi-line Google Sheets cells.
         
         New method for User Story 2 to properly handle the synchronized
-        data structure across columns F, G, H.
+        data structure across columns F, G, H, I.
+        
+        ДОБАВЛЕНО 10.11.2025: Добавлена поддержка парсинга оборачиваемости по складам.
         
         Args:
             names_cell: Multi-line cell with warehouse names
             orders_cell: Multi-line cell with orders data
             stock_cell: Multi-line cell with stock data
+            turnover_cell: Multi-line cell with turnover data
             
         Returns:
             List of Warehouse objects with synchronized data
@@ -374,21 +386,24 @@ class ProductDataFormatter:
             names = str(names_cell).split('\n') if names_cell else []
             orders = str(orders_cell).split('\n') if orders_cell else []
             stock = str(stock_cell).split('\n') if stock_cell else []
+            turnover = str(turnover_cell).split('\n') if turnover_cell else []
             
             # Clean up entries
             names = [name.strip() for name in names if name.strip()]
             orders = [order.strip() for order in orders if order.strip()]
             stock = [stock_val.strip() for stock_val in stock if stock_val.strip()]
+            turnover = [turn.strip() for turn in turnover if turn.strip()]
             
             # Create synchronized warehouse list
             warehouses = []
-            max_length = max(len(names), len(orders), len(stock)) if (names or orders or stock) else 0
+            max_length = max(len(names), len(orders), len(stock), len(turnover)) if (names or orders or stock or turnover) else 0
             
             for i in range(max_length):
                 # Get values with safe indexing
                 name = names[i] if i < len(names) else ""
                 orders_val = orders[i] if i < len(orders) else "0"
                 stock_val = stock[i] if i < len(stock) else "0"
+                turnover_val = turnover[i] if i < len(turnover) else "0"
                 
                 # Only create warehouse if it has a name
                 if name:
@@ -396,14 +411,22 @@ class ProductDataFormatter:
                         orders_int = int(orders_val) if orders_val.isdigit() else 0
                         stock_int = int(stock_val) if stock_val.isdigit() else 0
                         
+                        # Parse turnover as integer
+                        try:
+                            turnover_int = int(turnover_val) if turnover_val else 0
+                        except ValueError:
+                            turnover_int = 0
+                        
                         # Ensure non-negative values
                         orders_int = max(0, orders_int)
                         stock_int = max(0, stock_int)
+                        turnover_int = max(0, turnover_int)
                         
                         warehouse = Warehouse(
                             name=name,
                             orders=orders_int,
-                            stock=stock_int
+                            stock=stock_int,
+                            turnover=turnover_int
                         )
                         warehouses.append(warehouse)
                         
@@ -501,7 +524,7 @@ class ProductDataFormatter:
         Returns:
             List with empty values for each column
         """
-        return ["", "", 0, 0, 0.0, "", "", "", 0, 0]  # Updated to 10 columns (added FBO/FBS)
+        return ["", "", 0, 0, 0.0, "", "", "", ""]  # Updated to 9 columns (added warehouse turnover)
     
     @staticmethod
     def validate_row_data(row_data: List[Any]) -> Dict[str, Any]:
@@ -515,10 +538,10 @@ class ProductDataFormatter:
             Dict with validation results
         """
         try:
-            if len(row_data) < 8:
+            if len(row_data) < 9:
                 return {
                     "valid": False,
-                    "error": f"Insufficient columns: expected 8, got {len(row_data)}"
+                    "error": f"Insufficient columns: expected 9, got {len(row_data)}"
                 }
             
             # Check required fields

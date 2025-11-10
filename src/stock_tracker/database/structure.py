@@ -86,17 +86,17 @@ class SheetsTableStructure:
             header="Оборачиваемость",
             letter="E",
             width=130,
-            number_format="0.000",  # 3 decimal places
+            number_format="0",  # Целое число (без дробной части)
             alignment="CENTER"
         ),
         ColumnDefinition(
             key="warehouse_names",
             header="Название склада",
             letter="F",
-            width=180,
+            width=250,  # Увеличена ширина для длинных названий
             number_format="TEXT",
             alignment="LEFT",
-            wrap_text=True  # Multi-line warehouse names
+            wrap_text=False  # ИСПРАВЛЕНО 10.11.2025: Отключён перенос текста для предотвращения смещения строк
         ),
         ColumnDefinition(
             key="warehouse_orders",
@@ -112,6 +112,15 @@ class SheetsTableStructure:
             header="Остатки на складе",
             letter="H", 
             width=130,
+            number_format="TEXT",  # Multi-line numbers
+            alignment="CENTER",
+            wrap_text=True
+        ),
+        ColumnDefinition(
+            key="warehouse_turnover",
+            header="Оборачиваемость по складам",
+            letter="I",
+            width=180,
             number_format="TEXT",  # Multi-line numbers
             alignment="CENTER",
             wrap_text=True
@@ -170,7 +179,7 @@ class SheetsTableStructure:
         else:
             return f"{letter}{start_row}:{letter}{end_row}"
     
-    def get_row_range(self, row_number: int, start_col: str = "A", end_col: str = "H") -> str:
+    def get_row_range(self, row_number: int, start_col: str = "A", end_col: str = "I") -> str:
         """
         Get range string for a specific row.
         
@@ -180,7 +189,7 @@ class SheetsTableStructure:
             end_col: Ending column letter
             
         Returns:
-            Range string (e.g., "A2:H2")
+            Range string (e.g., "A2:I2")
         """
         return f"{start_col}{row_number}:{end_col}{row_number}"
     
@@ -196,9 +205,9 @@ class SheetsTableStructure:
             Range string for all data columns
         """
         if end_row is None:
-            return f"A{start_row}:H"
+            return f"A{start_row}:I"
         else:
-            return f"A{start_row}:H{end_row}"
+            return f"A{start_row}:I{end_row}"
     
     def initialize_table(self) -> None:
         """
@@ -215,7 +224,7 @@ class SheetsTableStructure:
             
             # Set headers in row 1
             headers = self.get_headers()
-            self.sheets_client.update_range("A1:H1", [headers])
+            self.sheets_client.update_range("A1:I1", [headers])
             
             # Apply header formatting
             self._format_headers()
@@ -240,7 +249,7 @@ class SheetsTableStructure:
             logger.info("Validating table structure...")
             
             # Read header row
-            headers = self.sheets_client.read_range("A1:H1")
+            headers = self.sheets_client.read_range("A1:I1")
             
             if not headers:
                 return {
@@ -330,7 +339,7 @@ class SheetsTableStructure:
         }
         
         try:
-            self.sheets_client.format_range("A1:H1", header_format)
+            self.sheets_client.format_range("A1:I1", header_format)
             logger.debug("Applied header formatting")
         except Exception as e:
             logger.warning(f"Failed to format headers: {e}")
@@ -442,11 +451,11 @@ class SheetsTableStructure:
                 }
             }
             
-            # Format turnover column (E) as decimal
+            # Format turnover column (E) as integer (целое число)
             turnover_format = {
                 "numberFormat": {
                     "type": "NUMBER",
-                    "pattern": "#,##0.000"
+                    "pattern": "#,##0"
                 }
             }
             
@@ -526,6 +535,21 @@ class SheetsTableStructure:
                         },
                         "fields": "userEnteredFormat.numberFormat"
                     }
+                },
+                # Warehouse turnover column (I)
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": worksheet.id,
+                            "startRowIndex": 1,
+                            "startColumnIndex": 8,  # Column I
+                            "endColumnIndex": 9
+                        },
+                        "cell": {
+                            "userEnteredFormat": stock_format
+                        },
+                        "fields": "userEnteredFormat.numberFormat"
+                    }
                 }
             ]
             
@@ -542,23 +566,30 @@ class SheetsTableStructure:
         """
         Apply text wrapping to multi-line columns.
         
-        Enhanced for User Story 2 with improved multi-line cell formatting
-        for warehouse data in columns F, G, H.
+        ИСПРАВЛЕНО 10.11.2025: Колонка F (Название склада) теперь использует OVERFLOW_CELL
+        вместо WRAP, чтобы длинные названия не увеличивали высоту строки.
+        Колонки G, H, I продолжают использовать WRAP для многострочных данных.
         
         Args:
             worksheet: Worksheet to format
         """
         try:
-            logger.info("Applying enhanced text wrapping for multi-warehouse data...")
+            logger.info("Applying text formatting (no wrap for warehouse names, wrap for data)...")
             
-            # Enhanced wrap format for multi-line warehouse data
+            # Format for multi-line warehouse data (orders, stock, turnover)
             wrap_format = {
                 "wrapStrategy": "WRAP",
                 "verticalAlignment": "TOP"  # Align to top for better readability
             }
             
+            # Format for warehouse names - NO WRAP to prevent row expansion
+            no_wrap_format = {
+                "wrapStrategy": "OVERFLOW_CELL",  # Text overflows into next cell, no row expansion
+                "verticalAlignment": "TOP"
+            }
+            
             requests = [
-                # Warehouse name column (F) - Enhanced formatting
+                # Warehouse name column (F) - NO WRAP to prevent row height expansion
                 {
                     "repeatCell": {
                         "range": {
@@ -569,7 +600,7 @@ class SheetsTableStructure:
                         },
                         "cell": {
                             "userEnteredFormat": {
-                                **wrap_format,
+                                **no_wrap_format,
                                 "textFormat": {
                                     "fontSize": 10
                                 }
@@ -619,13 +650,34 @@ class SheetsTableStructure:
                         },
                         "fields": "userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment,userEnteredFormat.horizontalAlignment,userEnteredFormat.textFormat.fontSize"
                     }
+                },
+                # Warehouse turnover column (I) - Centered numbers with wrapping
+                {
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": worksheet.id,
+                            "startRowIndex": 1,
+                            "startColumnIndex": 8,  # Column I
+                            "endColumnIndex": 9
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                **wrap_format,
+                                "horizontalAlignment": "CENTER",
+                                "textFormat": {
+                                    "fontSize": 10
+                                }
+                            }
+                        },
+                        "fields": "userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment,userEnteredFormat.horizontalAlignment,userEnteredFormat.textFormat.fontSize"
+                    }
                 }
             ]
             
             # Execute batch update
             worksheet.spreadsheet.batch_update({"requests": requests})
             
-            logger.info("✅ Enhanced text wrapping applied successfully for multi-warehouse data")
+            logger.info("✅ Text formatting applied: Column F (OVERFLOW), Columns G/H/I (WRAP)")
             
         except Exception as e:
             logger.error(f"Failed to apply text wrapping: {e}")
@@ -673,11 +725,11 @@ class SheetsTableStructure:
             
             requests = []
             
-            # Apply to warehouse columns F, G, H
-            for col_idx, col_name in [(5, "F"), (6, "G"), (7, "H")]:
+            # Apply to warehouse columns F, G, H, I
+            for col_idx, col_name in [(5, "F"), (6, "G"), (7, "H"), (8, "I")]:
                 # Adjust alignment for different columns
                 format_copy = multiline_format.copy()
-                if col_name in ["G", "H"]:  # Orders and stock columns
+                if col_name in ["G", "H", "I"]:  # Orders, stock and turnover columns
                     format_copy["horizontalAlignment"] = "CENTER"
                 else:  # Names column
                     format_copy["horizontalAlignment"] = "LEFT"
@@ -709,70 +761,46 @@ class SheetsTableStructure:
             # Non-critical error, don't raise
     
     def set_row_heights_for_multiline_data(self, worksheet: gspread.Worksheet, 
-                                         min_height: int = 60) -> None:
+                                         min_height: int = 21) -> None:
         """
-        Set appropriate row heights for multi-line warehouse data.
+        Set fixed row heights to prevent row expansion from long warehouse names.
         
-        New method for User Story 2 to ensure warehouse data is properly visible
-        when displayed across multiple lines within cells.
+        ИСПРАВЛЕНО 10.11.2025: Вместо динамического расчёта высоты строк,
+        устанавливаем фиксированную высоту для всех строк данных.
+        Это предотвращает смещение данных при длинных названиях складов.
         
         Args:
             worksheet: Worksheet to format
-            min_height: Minimum row height in pixels
+            min_height: Fixed row height in pixels (default 21 - стандартная высота Google Sheets)
         """
         try:
-            logger.info(f"Setting row heights for multi-line data (min: {min_height}px)...")
+            logger.info(f"Setting fixed row heights ({min_height}px) to prevent row expansion...")
             
-            # Get current data to determine which rows need adjustment
+            # Get current data to determine how many rows we have
             all_data = worksheet.get_all_values()
             if len(all_data) <= 1:
                 logger.info("No data rows to adjust")
                 return
             
-            requests = []
-            
-            # Check each data row for multi-line content
-            for row_idx in range(1, len(all_data)):  # Skip header
-                row_data = all_data[row_idx]
-                
-                # Check warehouse columns (F, G, H) for newlines
-                has_multiline = False
-                max_lines = 1
-                
-                for col_idx in [5, 6, 7]:  # Columns F, G, H
-                    if col_idx < len(row_data) and row_data[col_idx]:
-                        lines = str(row_data[col_idx]).count('\n') + 1
-                        if lines > 1:
-                            has_multiline = True
-                            max_lines = max(max_lines, lines)
-                
-                # Set row height based on content
-                if has_multiline:
-                    # Calculate height: base height + extra height per line
-                    calculated_height = max(min_height, 25 * max_lines + 10)
-                    
-                    request = {
-                        "updateDimensionProperties": {
-                            "range": {
-                                "sheetId": worksheet.id,
-                                "dimension": "ROWS",
-                                "startIndex": row_idx,
-                                "endIndex": row_idx + 1
-                            },
-                            "properties": {
-                                "pixelSize": calculated_height
-                            },
-                            "fields": "pixelSize"
-                        }
-                    }
-                    requests.append(request)
+            # Set fixed height for all data rows in one batch request
+            request = {
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": worksheet.id,
+                        "dimension": "ROWS",
+                        "startIndex": 1,  # Start from row 2 (skip header)
+                        "endIndex": len(all_data)  # All data rows
+                    },
+                    "properties": {
+                        "pixelSize": min_height
+                    },
+                    "fields": "pixelSize"
+                }
+            }
             
             # Execute batch update
-            if requests:
-                worksheet.spreadsheet.batch_update({"requests": requests})
-                logger.info(f"✅ Adjusted row heights for {len(requests)} rows with multi-line data")
-            else:
-                logger.info("No rows required height adjustment")
+            worksheet.spreadsheet.batch_update({"requests": [request]})
+            logger.info(f"✅ Set fixed height {min_height}px for {len(all_data)-1} data rows")
             
         except Exception as e:
             logger.error(f"Failed to set row heights: {e}")
@@ -837,7 +865,7 @@ class SheetsTableStructure:
                             "startRowIndex": 0,
                             "endRowIndex": 1,
                             "startColumnIndex": 0,
-                            "endColumnIndex": 8
+                            "endColumnIndex": 9
                         },
                         "cell": {
                             "userEnteredFormat": header_format
@@ -853,7 +881,7 @@ class SheetsTableStructure:
                             "startRowIndex": 1,
                             "endRowIndex": 1000,  # Format up to 1000 rows
                             "startColumnIndex": 0,
-                            "endColumnIndex": 8
+                            "endColumnIndex": 9
                         },
                         "cell": {
                             "userEnteredFormat": data_format
@@ -872,7 +900,7 @@ class SheetsTableStructure:
                             "startRowIndex": row,
                             "endRowIndex": row + 1,
                             "startColumnIndex": 0,
-                            "endColumnIndex": 8
+                            "endColumnIndex": 9
                         },
                         "cell": {
                             "userEnteredFormat": even_row_format
@@ -909,7 +937,8 @@ class SheetsTableStructure:
                 4: 100,  # E: Turnover
                 5: 150,  # F: Warehouse Names
                 6: 120,  # G: Warehouse Orders
-                7: 120   # H: Warehouse Stock
+                7: 120,  # H: Warehouse Stock
+                8: 180   # I: Warehouse Turnover
             }
             
             requests = []
@@ -964,11 +993,77 @@ class SheetsTableStructure:
             # Apply standard formatting last
             self.set_column_widths(worksheet)
             
+            # Apply conditional formatting for turnover column
+            self.apply_turnover_conditional_formatting(worksheet)
+            
             logger.info("✅ Complete formatting with multi-warehouse support applied successfully")
             
         except Exception as e:
             logger.error(f"Failed to apply complete formatting: {e}")
             raise SheetsAPIError(f"Failed to format worksheet: {e}")
+    
+    def apply_turnover_conditional_formatting(self, worksheet: gspread.Worksheet) -> None:
+        """
+        Apply conditional formatting to the turnover column (E).
+        
+        Highlights cells in red when turnover is 14 days or less,
+        indicating low stock that needs attention.
+        
+        Args:
+            worksheet: Worksheet to format
+        """
+        try:
+            logger.info("Applying conditional formatting for turnover column...")
+            
+            # Conditional format rule: highlight red when turnover <= 14
+            conditional_format_rule = {
+                "addConditionalFormatRule": {
+                    "rule": {
+                        "ranges": [{
+                            "sheetId": worksheet.id,
+                            "startRowIndex": 1,  # Skip header (row 1)
+                            "startColumnIndex": 4,  # Column E (0-indexed)
+                            "endColumnIndex": 5
+                        }],
+                        "booleanRule": {
+                            "condition": {
+                                "type": "NUMBER_LESS_THAN_EQ",
+                                "values": [{
+                                    "userEnteredValue": "14"
+                                }]
+                            },
+                            "format": {
+                                "backgroundColor": {
+                                    "red": 0.95,
+                                    "green": 0.2,
+                                    "blue": 0.2,
+                                    "alpha": 1.0
+                                },
+                                "textFormat": {
+                                    "foregroundColor": {
+                                        "red": 1.0,
+                                        "green": 1.0,
+                                        "blue": 1.0,
+                                        "alpha": 1.0
+                                    },
+                                    "bold": True
+                                }
+                            }
+                        }
+                    },
+                    "index": 0
+                }
+            }
+            
+            # Execute the conditional formatting request
+            worksheet.spreadsheet.batch_update({"requests": [conditional_format_rule]})
+            
+            logger.info("✅ Conditional formatting applied: turnover <= 14 days highlighted in red")
+            
+        except Exception as e:
+            logger.error(f"Failed to apply conditional formatting: {e}")
+            # Non-critical error, don't raise but log warning
+            logger.warning("Conditional formatting will not be applied, but data sync will continue")
     
     def apply_warehouse_column_formatting(self, worksheet: gspread.Worksheet) -> None:
         """
@@ -1062,6 +1157,28 @@ class SheetsTableStructure:
                     },
                     "cell": {
                         "userEnteredFormat": stock_format
+                    },
+                    "fields": "userEnteredFormat"
+                }
+            })
+            
+            # Column I: Warehouse Turnover - Center aligned
+            turnover_format = {
+                **warehouse_format,
+                "horizontalAlignment": "CENTER",
+                "backgroundColor": {"red": 0.98, "green": 1.0, "blue": 1.0, "alpha": 1.0}
+            }
+            
+            requests.append({
+                "repeatCell": {
+                    "range": {
+                        "sheetId": worksheet.id,
+                        "startRowIndex": 1,
+                        "startColumnIndex": 8,  # Column I
+                        "endColumnIndex": 9
+                    },
+                    "cell": {
+                        "userEnteredFormat": turnover_format
                     },
                     "fields": "userEnteredFormat"
                 }
