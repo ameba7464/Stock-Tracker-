@@ -236,10 +236,8 @@ class StockTrackerConfig(BaseSettings):
         case_sensitive = False
         extra = "ignore"  # Allow extra fields but ignore them
     
-    def __init__(self, **kwargs):
-        """Initialize configuration."""
-        super().__init__(**kwargs)
-        
+    def model_post_init(self, __context):
+        """Post-initialization hook for Pydantic v2."""
         # Поддержка GOOGLE_SERVICE_ACCOUNT как JSON строки (для Railway/Render)
         if self.google_service_account:
             try:
@@ -256,8 +254,8 @@ class StockTrackerConfig(BaseSettings):
                 json.dump(service_account_json, temp_file)
                 temp_file.close()
                 
-                # Перезаписываем путь временным файлом
-                self.google_service_account_key_path = temp_file.name
+                # Устанавливаем путь через __dict__ чтобы обойти Pydantic validation
+                object.__setattr__(self, 'google_service_account_key_path', temp_file.name)
                 logger.info(f"✅ Создан временный файл service account: {temp_file.name}")
                 logger.debug(f"🔍 google_service_account_key_path установлен в: {self.google_service_account_key_path}")
                 
