@@ -214,7 +214,8 @@ class StockTrackerConfig(BaseSettings):
     wildberries_api_timeout: int = Field(default=30, env="WILDBERRIES_API_TIMEOUT")
     wildberries_rate_limit: int = Field(default=60, env="WILDBERRIES_RATE_LIMIT")
     
-    google_service_account_key_path: str = Field(..., env="GOOGLE_SERVICE_ACCOUNT_KEY_PATH")
+    google_service_account_key_path: Optional[str] = Field(default=None, env="GOOGLE_SERVICE_ACCOUNT_KEY_PATH")
+    google_service_account: Optional[str] = Field(default=None, env="GOOGLE_SERVICE_ACCOUNT")
     google_sheet_id: str = Field(..., env="GOOGLE_SHEET_ID")
     google_sheet_name: str = Field(default="Stock Tracker", env="GOOGLE_SHEET_NAME")
     google_sheets_batch_size: int = Field(default=100, env="GOOGLE_SHEETS_BATCH_SIZE")
@@ -244,6 +245,38 @@ class StockTrackerConfig(BaseSettings):
     def __init__(self, **kwargs):
         """Initialize configuration."""
         super().__init__(**kwargs)
+        
+        # Поддержка GOOGLE_SERVICE_ACCOUNT как JSON строки (для Railway/Render)
+        if self.google_service_account and not self.google_service_account_key_path:
+            try:
+                import tempfile
+                service_account_json = json.loads(self.google_service_account)
+                
+                # Создаем временный файл с credentials
+                temp_file = tempfile.NamedTemporaryFile(
+                    mode='w', 
+                    delete=False, 
+                    suffix='.json',
+                    prefix='service-account-'
+                )
+                json.dump(service_account_json, temp_file)
+                temp_file.close()
+                
+                self.google_service_account_key_path = temp_file.name
+                logger.info(f"✅ Создан временный файл service account: {temp_file.name}")
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Ошибка парсинга GOOGLE_SERVICE_ACCOUNT JSON: {e}")
+                raise ValueError("GOOGLE_SERVICE_ACCOUNT должен быть валидным JSON")
+            except Exception as e:
+                logger.error(f"❌ Ошибка создания временного файла: {e}")
+                raise
+        
+        # Проверка что есть хотя бы один способ указать credentials
+        if not self.google_service_account_key_path:
+            raise ValueError(
+                "Необходимо указать GOOGLE_SERVICE_ACCOUNT_KEY_PATH или GOOGLE_SERVICE_ACCOUNT"
+            )
         
     @property
     def wildberries(self) -> WildberriesAPIConfig:
