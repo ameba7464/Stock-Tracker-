@@ -70,12 +70,18 @@ async def run_update():
         logger.info("=" * 70)
         logger.info("✅ ОБНОВЛЕНИЕ ЗАВЕРШЕНО УСПЕШНО!")
         logger.info(f"📊 Статус: {result.status.value if hasattr(result.status, 'value') else result.status}")
-        logger.info(f"📦 Обработано товаров: {result.products_synced}")
-        logger.info(f"✅ Успешно: {result.products_successful}")
+        logger.info(f"📦 Всего товаров: {result.products_total}")
+        logger.info(f"✅ Обработано: {result.products_processed}")
         if result.products_failed > 0:
             logger.warning(f"⚠️  Ошибок: {result.products_failed}")
+        if result.errors:
+            logger.warning(f"❌ Первые ошибки:")
+            for error in result.errors[:3]:
+                logger.warning(f"   - {error}")
         logger.info(f"🕐 Время завершения: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
-        logger.info(f"⏱️  Длительность: {result.duration:.2f} сек")
+        if result.completed_at and result.started_at:
+            duration = (result.completed_at - result.started_at).total_seconds()
+            logger.info(f"⏱️  Длительность: {duration:.2f} сек")
         logger.info("=" * 70)
         
         return True
