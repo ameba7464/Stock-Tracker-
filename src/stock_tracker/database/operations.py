@@ -28,13 +28,13 @@ from stock_tracker.utils.monitoring import get_monitoring_system
 logger = get_logger(__name__)
 
 
-def retry_on_quota_error(max_retries=3, base_delay=2.0):
+def retry_on_quota_error(max_retries=5, base_delay=3.0):
     """
     Декоратор для повтора операции при превышении квоты Google Sheets API.
     
     Args:
-        max_retries: Максимальное количество попыток
-        base_delay: Базовая задержка в секундах (увеличивается экспоненциально)
+        max_retries: Максимальное количество попыток (по умолчанию 5)
+        base_delay: Базовая задержка в секундах (увеличивается экспоненциально, по умолчанию 3s)
     """
     def decorator(func):
         @wraps(func)
@@ -47,9 +47,9 @@ def retry_on_quota_error(max_retries=3, base_delay=2.0):
                     if '429' in str(e) or 'Quota exceeded' in str(e):
                         last_exception = e
                         if attempt < max_retries - 1:
-                            # Экспоненциальная задержка: 2, 4, 8 секунд
+                            # Экспоненциальная задержка: 3, 6, 12, 24, 48 секунд
                             delay = base_delay * (2 ** attempt)
-                            logger.warning(f"Quota exceeded, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                            logger.warning(f"⚠️  Quota exceeded, waiting {delay}s before retry (attempt {attempt + 1}/{max_retries})")
                             time.sleep(delay)
                         else:
                             logger.error(f"Max retries reached for quota error")

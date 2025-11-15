@@ -83,7 +83,11 @@ async def run_update():
             duration = (result.completed_at - result.started_at).total_seconds()
             logger.info(f"⏱️  Длительность: {duration:.2f} сек")
         elif hasattr(result, 'duration') and result.duration:
-            logger.info(f"⏱️  Длительность: {result.duration:.2f} сек")
+            # duration может быть строкой или числом
+            if isinstance(result.duration, (int, float)):
+                logger.info(f"⏱️  Длительность: {result.duration:.2f} сек")
+            else:
+                logger.info(f"⏱️  Длительность: {result.duration}")
         logger.info("=" * 70)
         
         return True

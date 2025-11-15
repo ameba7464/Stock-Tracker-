@@ -649,9 +649,10 @@ class ProductService:
                                 logger.info(f"       └─ {wh.name}: stock={wh.stock}, orders={wh.orders}")
                         
                         # Добавляем задержку для предотвращения превышения квоты Google Sheets API
-                        # Railway/Render: 1 секунда между операциями = 60 запросов/минуту (в пределах лимита)
+                        # Railway/Render: 2 секунды между операциями = 30 запросов/минуту (безопасный лимит)
+                        # Google Sheets API лимит: 60 запросов/минуту, используем 50% для запаса
                         import time
-                        time.sleep(1.0)
+                        time.sleep(2.0)
                     else:
                         error_count += 1
                         sync_session.products_failed += 1
