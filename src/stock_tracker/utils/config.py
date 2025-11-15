@@ -241,12 +241,12 @@ class StockTrackerConfig(BaseSettings):
         super().__init__(**kwargs)
         
         # Поддержка GOOGLE_SERVICE_ACCOUNT как JSON строки (для Railway/Render)
-        if self.google_service_account and not self.google_service_account_key_path:
+        if self.google_service_account:
             try:
-                import tempfile
                 service_account_json = json.loads(self.google_service_account)
                 
                 # Создаем временный файл с credentials
+                import tempfile
                 temp_file = tempfile.NamedTemporaryFile(
                     mode='w', 
                     delete=False, 
@@ -256,8 +256,10 @@ class StockTrackerConfig(BaseSettings):
                 json.dump(service_account_json, temp_file)
                 temp_file.close()
                 
+                # Перезаписываем путь временным файлом
                 self.google_service_account_key_path = temp_file.name
                 logger.info(f"✅ Создан временный файл service account: {temp_file.name}")
+                logger.debug(f"🔍 google_service_account_key_path установлен в: {self.google_service_account_key_path}")
                 
             except json.JSONDecodeError as e:
                 logger.error(f"❌ Ошибка парсинга GOOGLE_SERVICE_ACCOUNT JSON: {e}")
@@ -266,11 +268,13 @@ class StockTrackerConfig(BaseSettings):
                 logger.error(f"❌ Ошибка создания временного файла: {e}")
                 raise
         
-        # Проверка что есть хотя бы один способ указать credentials
+        # Проверка что есть путь к credentials
         if not self.google_service_account_key_path:
             raise ValueError(
                 "Необходимо указать GOOGLE_SERVICE_ACCOUNT_KEY_PATH или GOOGLE_SERVICE_ACCOUNT"
             )
+        
+        logger.debug(f"🔍 Final google_service_account_key_path: {self.google_service_account_key_path}")
         
     @property
     def wildberries(self) -> WildberriesAPIConfig:
@@ -289,6 +293,7 @@ class StockTrackerConfig(BaseSettings):
     @property 
     def google_sheets(self) -> GoogleSheetsConfig:
         """Get Google Sheets configuration."""
+        logger.debug(f"🔍 Creating GoogleSheetsConfig with path: {self.google_service_account_key_path}")
         return GoogleSheetsConfig(
             service_account_key_path=self.google_service_account_key_path,
             sheet_id=self.google_sheet_id,
