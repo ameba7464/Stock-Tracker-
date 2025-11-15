@@ -59,36 +59,23 @@ async def run_update():
             sheet_id=config.google_sheets.sheet_id
         )
         
-        operations = SheetsOperations(sheets_client)
         product_service = ProductService(config=config)
         
         logger.info("✅ Подключение к Google Sheets установлено")
         
-        # Получение данных из Wildberries API
-        logger.info("🔄 Получение данных из Wildberries API...")
-        logger.info("   📦 Получение остатков (Dual API: FBO + FBS)...")
-        stocks_data = await product_service.get_all_stocks_dual_api()
-        
-        logger.info("   📋 Получение заказов...")
-        orders_data = await product_service.get_orders()
-        
-        logger.info(f"✅ Данные получены:")
-        logger.info(f"   📦 Товаров: {len(stocks_data)}")
-        logger.info(f"   📋 Заказов: {len(orders_data)}")
-        
-        # Обновление таблицы
-        logger.info("📝 Обновление Google Sheets...")
-        result = await operations.update_table_data(stocks_data, orders_data)
+        # Синхронизация данных из Wildberries API в Google Sheets
+        logger.info("🔄 Синхронизация данных из Wildberries API (Dual API: FBO + FBS)...")
+        result = await product_service.sync_from_dual_api_to_sheets()
         
         logger.info("=" * 70)
         logger.info("✅ ОБНОВЛЕНИЕ ЗАВЕРШЕНО УСПЕШНО!")
-        logger.info(f"📊 Статус: {result.status}")
-        logger.info(f"📦 Обработано товаров: {result.products_processed}")
-        if result.errors:
-            logger.warning(f"⚠️  Ошибки: {len(result.errors)}")
-            for error in result.errors[:5]:  # Показываем первые 5 ошибок
-                logger.warning(f"   - {error}")
+        logger.info(f"📊 Статус: {result.status.value if hasattr(result.status, 'value') else result.status}")
+        logger.info(f"📦 Обработано товаров: {result.products_synced}")
+        logger.info(f"✅ Успешно: {result.products_successful}")
+        if result.products_failed > 0:
+            logger.warning(f"⚠️  Ошибок: {result.products_failed}")
         logger.info(f"🕐 Время завершения: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        logger.info(f"⏱️  Длительность: {result.duration:.2f} сек")
         logger.info("=" * 70)
         
         return True
