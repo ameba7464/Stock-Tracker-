@@ -55,8 +55,8 @@ async def run_update():
         # Инициализация клиентов
         logger.info("📊 Подключение к Google Sheets...")
         sheets_client = GoogleSheetsClient(
-            credentials_path=config.google.service_account_key_path,
-            sheet_id=config.google.sheet_id
+            credentials_path=config.google_sheets.service_account_key_path,
+            sheet_id=config.google_sheets.sheet_id
         )
         
         operations = SheetsOperations(sheets_client)
