@@ -9,6 +9,8 @@ data validation, and optimized batch processing for high-performance operations.
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
 import asyncio
+import time
+from functools import wraps
 
 import gspread
 from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
@@ -24,6 +26,45 @@ from stock_tracker.utils.monitoring import get_monitoring_system
 
 
 logger = get_logger(__name__)
+
+
+def retry_on_quota_error(max_retries=3, base_delay=2.0):
+    """
+    Декоратор для повтора операции при превышении квоты Google Sheets API.
+    
+    Args:
+        max_retries: Максимальное количество попыток
+        base_delay: Базовая задержка в секундах (увеличивается экспоненциально)
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except APIError as e:
+                    if '429' in str(e) or 'Quota exceeded' in str(e):
+                        last_exception = e
+                        if attempt < max_retries - 1:
+                            # Экспоненциальная задержка: 2, 4, 8 секунд
+                            delay = base_delay * (2 ** attempt)
+                            logger.warning(f"Quota exceeded, retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                            time.sleep(delay)
+                        else:
+                            logger.error(f"Max retries reached for quota error")
+                            raise
+                    else:
+                        # Другая API ошибка - не повторяем
+                        raise
+                except Exception as e:
+                    # Непредвиденная ошибка - не повторяем
+                    raise
+            
+            # Если все попытки исчерпаны
+            raise last_exception
+        return wrapper
+    return decorator
 
 
 class SheetsOperations:
@@ -54,6 +95,7 @@ class SheetsOperations:
         
         logger.info("Initialized SheetsOperations with performance optimization")
         
+    @retry_on_quota_error(max_retries=3, base_delay=2.0)
     def get_or_create_worksheet(self, spreadsheet_id: str, 
                               worksheet_name: str = "Stock Tracker") -> gspread.Worksheet:
         """

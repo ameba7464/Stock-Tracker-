@@ -647,6 +647,11 @@ class ProductService:
                                       f"Warehouses={len(product.warehouses)}")
                             for wh in product.warehouses[:3]:
                                 logger.info(f"       └─ {wh.name}: stock={wh.stock}, orders={wh.orders}")
+                        
+                        # Добавляем задержку для предотвращения превышения квоты Google Sheets API
+                        # Railway/Render: 1 секунда между операциями = 60 запросов/минуту (в пределах лимита)
+                        import time
+                        time.sleep(1.0)
                     else:
                         error_count += 1
                         sync_session.products_failed += 1

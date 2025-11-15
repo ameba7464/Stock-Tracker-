@@ -79,9 +79,11 @@ async def run_update():
             for error in result.errors[:3]:
                 logger.warning(f"   - {error}")
         logger.info(f"🕐 Время завершения: {datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z')}")
-        if result.completed_at and result.started_at:
+        if hasattr(result, 'completed_at') and hasattr(result, 'started_at') and result.completed_at and result.started_at:
             duration = (result.completed_at - result.started_at).total_seconds()
             logger.info(f"⏱️  Длительность: {duration:.2f} сек")
+        elif hasattr(result, 'duration') and result.duration:
+            logger.info(f"⏱️  Длительность: {result.duration:.2f} сек")
         logger.info("=" * 70)
         
         return True

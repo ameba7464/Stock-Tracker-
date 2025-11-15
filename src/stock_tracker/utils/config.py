@@ -243,7 +243,14 @@ class StockTrackerConfig(BaseSettings):
         # Поддержка GOOGLE_SERVICE_ACCOUNT как JSON строки (для Railway/Render)
         if self.google_service_account and not self.google_service_account_key_path:
             try:
+                logger.info("🔍 Обнаружена переменная GOOGLE_SERVICE_ACCOUNT, создаем временный файл...")
                 service_account_json = json.loads(self.google_service_account)
+                
+                # Валидация обязательных полей
+                required_fields = ['type', 'project_id', 'private_key', 'client_email']
+                missing_fields = [f for f in required_fields if f not in service_account_json]
+                if missing_fields:
+                    raise ValueError(f"В GOOGLE_SERVICE_ACCOUNT отсутствуют обязательные поля: {', '.join(missing_fields)}")
                 
                 # Создаем временный файл с credentials
                 import tempfile
@@ -256,24 +263,43 @@ class StockTrackerConfig(BaseSettings):
                 json.dump(service_account_json, temp_file)
                 temp_file.close()
                 
+                # Проверяем, что файл действительно создан
+                if not Path(temp_file.name).exists():
+                    raise FileNotFoundError(f"Не удалось создать временный файл: {temp_file.name}")
+                
                 # Устанавливаем путь через object.__setattr__ для обхода frozen/immutable
                 object.__setattr__(self, 'google_service_account_key_path', temp_file.name)
                 logger.info(f"✅ Создан временный файл service account: {temp_file.name}")
+                logger.info(f"✅ Service Account Email: {service_account_json.get('client_email', 'N/A')}")
                 logger.debug(f"🔍 google_service_account_key_path установлен в: {self.google_service_account_key_path}")
                 
             except json.JSONDecodeError as e:
                 logger.error(f"❌ Ошибка парсинга GOOGLE_SERVICE_ACCOUNT JSON: {e}")
+                logger.error("💡 Убедитесь, что переменная содержит валидный JSON без лишних символов")
                 raise ValueError("GOOGLE_SERVICE_ACCOUNT должен быть валидным JSON")
             except Exception as e:
                 logger.error(f"❌ Ошибка создания временного файла: {e}")
+                logger.error("💡 Проверьте права доступа и доступное дисковое пространство")
                 raise
         
         # Проверка что есть путь к credentials
         if not self.google_service_account_key_path:
+            logger.error("❌ Не указан путь к Service Account!")
+            logger.error("💡 Установите одну из переменных окружения:")
+            logger.error("   - GOOGLE_SERVICE_ACCOUNT_KEY_PATH (путь к файлу)")
+            logger.error("   - GOOGLE_SERVICE_ACCOUNT (JSON содержимое)")
             raise ValueError(
                 "Необходимо указать GOOGLE_SERVICE_ACCOUNT_KEY_PATH или GOOGLE_SERVICE_ACCOUNT"
             )
         
+        # Проверяем, что файл существует
+        if not Path(self.google_service_account_key_path).exists():
+            logger.error(f"❌ Файл service account не найден: {self.google_service_account_key_path}")
+            logger.error("💡 Если используете GOOGLE_SERVICE_ACCOUNT, убедитесь что JSON валиден")
+            logger.error("💡 Если используете GOOGLE_SERVICE_ACCOUNT_KEY_PATH, проверьте путь к файлу")
+            raise FileNotFoundError(f"Service account file not found: {self.google_service_account_key_path}")
+        
+        logger.info(f"✅ Service account file проверен: {self.google_service_account_key_path}")
         logger.debug(f"🔍 Final google_service_account_key_path: {self.google_service_account_key_path}")
         
     @property

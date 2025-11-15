@@ -67,8 +67,10 @@ class GoogleSheetsClient:
             
             # Validate service account file exists
             if not Path(self.service_account_path).exists():
+                # Безопасное сообщение об ошибке без раскрытия содержимого
                 raise AuthenticationError(
-                    f"Service account file not found: {self.service_account_path}"
+                    f"Service account file not found at path: {self.service_account_path}\n"
+                    f"Please ensure GOOGLE_SERVICE_ACCOUNT environment variable is set correctly."
                 )
             
             # Load credentials from service account file
