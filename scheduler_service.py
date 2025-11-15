@@ -60,7 +60,7 @@ async def run_update():
         )
         
         operations = SheetsOperations(sheets_client)
-        product_service = ProductService(api_key=config.wildberries.api_key)
+        product_service = ProductService(config=config)
         
         logger.info("✅ Подключение к Google Sheets установлено")
         
