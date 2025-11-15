@@ -235,11 +235,13 @@ class StockTrackerConfig(BaseSettings):
         env_file_encoding = "utf-8"
         case_sensitive = False
         extra = "ignore"  # Allow extra fields but ignore them
+        validate_assignment = True
     
-    def model_post_init(self, __context):
-        """Post-initialization hook for Pydantic v2."""
+    @model_validator(mode='after')
+    def setup_service_account_file(self) -> 'StockTrackerConfig':
+        """Setup service account file from JSON string if provided."""
         # Поддержка GOOGLE_SERVICE_ACCOUNT как JSON строки (для Railway/Render)
-        if self.google_service_account:
+        if self.google_service_account and not self.google_service_account_key_path:
             try:
                 service_account_json = json.loads(self.google_service_account)
                 
@@ -254,8 +256,8 @@ class StockTrackerConfig(BaseSettings):
                 json.dump(service_account_json, temp_file)
                 temp_file.close()
                 
-                # Устанавливаем путь через __dict__ чтобы обойти Pydantic validation
-                object.__setattr__(self, 'google_service_account_key_path', temp_file.name)
+                # Устанавливаем путь
+                self.google_service_account_key_path = temp_file.name
                 logger.info(f"✅ Создан временный файл service account: {temp_file.name}")
                 logger.debug(f"🔍 google_service_account_key_path установлен в: {self.google_service_account_key_path}")
                 
@@ -273,6 +275,7 @@ class StockTrackerConfig(BaseSettings):
             )
         
         logger.debug(f"🔍 Final google_service_account_key_path: {self.google_service_account_key_path}")
+        return self
         
     @property
     def wildberries(self) -> WildberriesAPIConfig:
