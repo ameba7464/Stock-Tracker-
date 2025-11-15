@@ -91,12 +91,16 @@ class GoogleSheetsConfig(BaseModel):
         @field_validator('service_account_key_path')
         @classmethod
         def validate_service_account_path(cls, v):
-            path = Path(v)
-            if not path.exists():
-                raise ValueError(f"Service account key file not found: {v}")
-            if not path.is_file():
-                raise ValueError(f"Service account key path is not a file: {v}")
-            return str(path.absolute())
+            # Проверяем только если это не временный файл (начинается с tmpfile)
+            # Для Railway/Render временный файл создается позже в __init__
+            if v and not v.startswith('/tmp/') and not 'tmpfile' in v.lower():
+                path = Path(v)
+                if not path.exists():
+                    raise ValueError(f"Service account key file not found: {v}")
+                if not path.is_file():
+                    raise ValueError(f"Service account key path is not a file: {v}")
+                return str(path.absolute())
+            return v
         
         @field_validator('sheet_id')
         @classmethod
@@ -114,12 +118,15 @@ class GoogleSheetsConfig(BaseModel):
     else:
         @validator('service_account_key_path')
         def validate_service_account_path(cls, v):
-            path = Path(v)
-            if not path.exists():
-                raise ValueError(f"Service account key file not found: {v}")
-            if not path.is_file():
-                raise ValueError(f"Service account key path is not a file: {v}")
-            return str(path.absolute())
+            # Проверяем только если это не временный файл
+            if v and not v.startswith('/tmp/') and not 'tmpfile' in v.lower():
+                path = Path(v)
+                if not path.exists():
+                    raise ValueError(f"Service account key file not found: {v}")
+                if not path.is_file():
+                    raise ValueError(f"Service account key path is not a file: {v}")
+                return str(path.absolute())
+            return v
         
         @validator('sheet_id')
         def validate_sheet_id(cls, v):
