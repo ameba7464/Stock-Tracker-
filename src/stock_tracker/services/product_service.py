@@ -532,6 +532,18 @@ class ProductService:
             # Step 3: Convert to Product models and write to Sheets
             logger.info("\n💾 Step 3: Writing products to Google Sheets...")
             
+            # ⚡ КЭШИРУЕМ WORKSHEET - получаем один раз перед циклом!
+            # Это предотвращает повторные вызовы get_or_create_worksheet() для каждого продукта
+            # и экономит API квоту (60 запросов/минуту)
+            worksheet = self.operations.get_or_create_worksheet(
+                self.config.google_sheets.sheet_id,
+                "Stock Tracker"
+            )
+            logger.info(f"✅ Worksheet кэширован: {worksheet.title}")
+            
+            # Enable skip_existence_check for better performance (avoids double API calls)
+            skip_existence_check = False
+            
             sync_session.products_total = len(stocks_by_article)
             updated_count = 0
             error_count = 0
@@ -629,11 +641,12 @@ class ProductService:
                     else:
                         product.turnover = 0.0
                     
-                    # Write/update in Google Sheets
+                    # Write/update in Google Sheets (используем кэшированный worksheet)
                     success = self.operations.create_or_update_product(
                         self.config.google_sheets.sheet_id,
                         product,
-                        skip_existence_check=skip_existence_check
+                        skip_existence_check=skip_existence_check,
+                        cached_worksheet=worksheet  # ⚡ Передаем кэшированный worksheet!
                     )
                     
                     if success:

@@ -674,7 +674,8 @@ class SheetsOperations:
     
     def create_or_update_product(self, spreadsheet_id: str, product: Product,
                                 worksheet_name: str = "Stock Tracker",
-                                skip_existence_check: bool = False) -> bool:
+                                skip_existence_check: bool = False,
+                                cached_worksheet: Optional[gspread.Worksheet] = None) -> bool:
         """
         Create a new product or update existing one.
         
@@ -687,43 +688,164 @@ class SheetsOperations:
             worksheet_name: Worksheet name (default: "Stock Tracker")
             skip_existence_check: Skip existence check and directly create product.
                                  Useful after clear_all_products() to avoid unnecessary API calls.
+            cached_worksheet: Pre-fetched worksheet object to avoid repeated API calls.
+                            CRITICAL for quota optimization when processing multiple products.
             
         Returns:
             True if successful, False otherwise
         """
         try:
+            # Use cached worksheet if provided, otherwise fetch it
+            worksheet = cached_worksheet if cached_worksheet is not None else \
+                       self.get_or_create_worksheet(spreadsheet_id, worksheet_name)
+            
             # If skip_existence_check is True, directly create the product
             if skip_existence_check:
                 logger.debug(f"Creating product (skipping existence check): {product.seller_article}")
-                return self.create_product(
-                    spreadsheet_id=spreadsheet_id,
-                    product=product,
-                    worksheet_name=worksheet_name
+                return self._create_product_with_worksheet(
+                    worksheet=worksheet,
+                    product=product
                 )
             
-            # Try to read existing product
-            existing_product = self.read_product(spreadsheet_id, product.seller_article, worksheet_name)
+            # Try to find existing product row
+            row_number = self._find_product_row(worksheet, product.seller_article)
             
-            if existing_product:
+            if row_number is not None:
                 # Product exists - update it
                 logger.debug(f"Updating existing product: {product.seller_article}")
-                return self.update_product(
-                    spreadsheet_id=spreadsheet_id,
-                    seller_article=product.seller_article,
-                    updated_product=product,
-                    worksheet_name=worksheet_name
+                return self._update_product_with_worksheet(
+                    worksheet=worksheet,
+                    row_number=row_number,
+                    product=product
                 )
             else:
                 # Product doesn't exist - create it
                 logger.debug(f"Creating new product: {product.seller_article}")
-                return self.create_product(
-                    spreadsheet_id=spreadsheet_id,
-                    product=product,
-                    worksheet_name=worksheet_name
+                return self._create_product_with_worksheet(
+                    worksheet=worksheet,
+                    product=product
                 )
                 
         except Exception as e:
             logger.error(f"Failed to create/update product {product.seller_article}: {e}")
+            return False
+    
+    def _create_product_with_worksheet(self, worksheet: gspread.Worksheet, 
+                                       product: Product) -> bool:
+        """
+        Create product using pre-fetched worksheet (avoids API call).
+        
+        Args:
+            worksheet: Pre-fetched worksheet object
+            product: Product to create
+            
+        Returns:
+            True if successful
+        """
+        try:
+            # Format product data
+            row_data = self.formatter.format_product_for_sheets(product)
+            
+            # Find next empty row
+            next_row = self._find_next_empty_row(worksheet)
+            
+            # Insert product data
+            range_name = f"A{next_row}:I{next_row}"
+            worksheet.update(range_name, [row_data])
+            
+            logger.info(f"Created product {product.seller_article} at row {next_row}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to create product {product.seller_article}: {e}")
+            return False
+    
+    def _update_product_with_worksheet(self, worksheet: gspread.Worksheet,
+                                      row_number: int,
+                                      product: Product) -> bool:
+        """
+        Update product using pre-fetched worksheet (avoids API call).
+        
+        Args:
+            worksheet: Pre-fetched worksheet object
+            row_number: Row number to update
+            product: Updated product data
+            
+        Returns:
+            True if successful
+        """
+        try:
+            # Format updated data
+            row_data = self.formatter.format_product_for_sheets(product)
+            
+            # Update row
+            range_name = f"A{row_number}:I{row_number}"
+            worksheet.update(range_name, [row_data])
+            
+            logger.info(f"Updated product {product.seller_article} at row {row_number}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to update product {product.seller_article}: {e}")
+            return False
+    
+    def _create_product_with_worksheet(self, worksheet: gspread.Worksheet, 
+                                       product: Product) -> bool:
+        """
+        Create product using pre-fetched worksheet (avoids API call).
+        
+        Args:
+            worksheet: Pre-fetched worksheet object
+            product: Product to create
+            
+        Returns:
+            True if successful
+        """
+        try:
+            # Format product data
+            row_data = self.formatter.format_product_for_sheets(product)
+            
+            # Find next empty row
+            next_row = self._find_next_empty_row(worksheet)
+            
+            # Insert product data
+            range_name = f"A{next_row}:I{next_row}"
+            worksheet.update(range_name, [row_data])
+            
+            logger.info(f"Created product {product.seller_article} at row {next_row}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to create product {product.seller_article}: {e}")
+            return False
+    
+    def _update_product_with_worksheet(self, worksheet: gspread.Worksheet,
+                                      row_number: int,
+                                      product: Product) -> bool:
+        """
+        Update product using pre-fetched worksheet (avoids API call).
+        
+        Args:
+            worksheet: Pre-fetched worksheet object
+            row_number: Row number to update
+            product: Updated product data
+            
+        Returns:
+            True if successful
+        """
+        try:
+            # Format updated data
+            row_data = self.formatter.format_product_for_sheets(product)
+            
+            # Update row
+            range_name = f"A{row_number}:I{row_number}"
+            worksheet.update(range_name, [row_data])
+            
+            logger.info(f"Updated product {product.seller_article} at row {row_number}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to update product {product.seller_article}: {e}")
             return False
     
     # Warehouse synchronization methods for User Story 2
