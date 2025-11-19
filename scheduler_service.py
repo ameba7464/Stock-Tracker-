@@ -239,7 +239,7 @@ def main():
     try:
         # Проверка переменных окружения
         print("[MAIN] Checking environment variables...")
-        required_vars = ['WILDBERRIES_API_KEY', 'GOOGLE_SHEETS_ID']
+        required_vars = ['WILDBERRIES_API_KEY', 'GOOGLE_SHEET_ID']
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         
         if missing_vars:

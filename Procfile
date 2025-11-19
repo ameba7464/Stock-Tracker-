@@ -1,1 +1,1 @@
-worker: python test_startup.py
+worker: python scheduler_service.py

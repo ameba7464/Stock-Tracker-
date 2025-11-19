@@ -18,7 +18,7 @@ print(f"Script location: {__file__}")
 print("=" * 80)
 
 print("\n[1/5] Checking environment variables...")
-env_vars = ['WILDBERRIES_API_KEY', 'GOOGLE_SHEETS_ID', 'GOOGLE_SERVICE_ACCOUNT_JSON']
+env_vars = ['WILDBERRIES_API_KEY', 'GOOGLE_SHEET_ID', 'GOOGLE_SERVICE_ACCOUNT']
 for var in env_vars:
     value = os.getenv(var)
     if value:
