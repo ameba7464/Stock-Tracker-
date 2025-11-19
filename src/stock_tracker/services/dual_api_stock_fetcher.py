@@ -7,6 +7,9 @@ from typing import Dict, List, Tuple
 from datetime import datetime, timedelta
 from stock_tracker.utils.config import get_config
 from stock_tracker.utils.warehouse_mapper import normalize_warehouse_name
+from stock_tracker.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class DualAPIStockFetcher:
@@ -31,11 +34,28 @@ class DualAPIStockFetcher:
             response = requests.get(url, headers=self.headers, timeout=30)
             response.raise_for_status()
             
-            self._fbs_warehouses = response.json()
+            data = response.json()
+            
+            # Validate response is a list
+            if not isinstance(data, list):
+                logger.error(f"FBS Warehouses API returned non-list data: {type(data)}")
+                self._fbs_warehouses = []
+                return []
+            
+            self._fbs_warehouses = data
             return self._fbs_warehouses
         
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Timeout fetching FBS warehouses: {e}")
+            self._fbs_warehouses = []
+            return []
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error fetching FBS warehouses: {e}")
+            self._fbs_warehouses = []
+            return []
         except Exception as e:
-            print(f"Error fetching FBS warehouses: {e}")
+            logger.error(f"Unexpected error fetching FBS warehouses: {e}")
+            self._fbs_warehouses = []
             return []
     
     def get_fbo_stocks(self, date_from: str = None) -> List[Dict]:
@@ -59,10 +79,23 @@ class DualAPIStockFetcher:
             response = requests.get(url, headers=self.headers, params=params, timeout=30)
             response.raise_for_status()
             
-            return response.json()
+            data = response.json()
+            
+            # Validate response is a list
+            if not isinstance(data, list):
+                logger.error(f"FBO API returned non-list data: {type(data)}")
+                return []
+            
+            return data
         
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Timeout fetching FBO stocks: {e}")
+            return []
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request error fetching FBO stocks: {e}")
+            return []
         except Exception as e:
-            print(f"Error fetching FBO stocks: {e}")
+            logger.error(f"Unexpected error fetching FBO stocks: {e}")
             return []
     
     def get_fbs_stocks(self, barcodes: List[str]) -> Dict[int, List[Dict]]:
@@ -108,8 +141,12 @@ class DualAPIStockFetcher:
                         'stocks': stocks
                     }
             
+            except requests.exceptions.Timeout as e:
+                logger.error(f"Timeout fetching FBS stocks for warehouse {wh_name_raw} -> {wh_name} ({wh_id}): {e}")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"Request error fetching FBS stocks for warehouse {wh_name_raw} -> {wh_name} ({wh_id}): {e}")
             except Exception as e:
-                print(f"Error fetching FBS stocks for warehouse {wh_name_raw} -> {wh_name} ({wh_id}): {e}")
+                logger.error(f"Unexpected error fetching FBS stocks for warehouse {wh_name_raw} -> {wh_name} ({wh_id}): {e}")
         
         return result
     
@@ -139,14 +176,22 @@ class DualAPIStockFetcher:
         # Step 1: Get FBO stocks
         fbo_stocks = self.get_fbo_stocks()
         
+        # Validate FBO stocks data
+        if not isinstance(fbo_stocks, list):
+            logger.warning(f"FBO stocks is not a list, got: {type(fbo_stocks)}")
+            fbo_stocks = []
+        
+        # Filter out non-dict items (errors or invalid data)
+        fbo_stocks = [s for s in fbo_stocks if isinstance(s, dict)]
+        
         # Step 2: Filter by article if needed
         # ВАЖНО: Используем startswith для учета всех вариантов артикула
         # (например, ItsSport2/50g, ItsSport2/50g+Aks5/20g, ItsSport2/50g+Aks5/20g.FBS)
         if supplier_article:
-            fbo_stocks = [s for s in fbo_stocks if s.get('supplierArticle', '').startswith(supplier_article)]
+            fbo_stocks = [s for s in fbo_stocks if isinstance(s, dict) and s.get('supplierArticle', '').startswith(supplier_article)]
         
         # Step 3: Extract unique barcodes
-        barcodes = list(set(s.get('barcode') for s in fbo_stocks if s.get('barcode')))
+        barcodes = list(set(s.get('barcode') for s in fbo_stocks if isinstance(s, dict) and s.get('barcode')))
         
         # Step 4: Get FBS stocks for these barcodes
         fbs_stocks_by_warehouse = self.get_fbs_stocks(barcodes)
@@ -161,6 +206,11 @@ class DualAPIStockFetcher:
         base_article_key = supplier_article if supplier_article else None
         
         for record in fbo_stocks:
+            # Validate record is a dict
+            if not isinstance(record, dict):
+                logger.warning(f"Skipping non-dict FBO record: {type(record)}")
+                continue
+                
             article = record.get('supplierArticle')
             if not article:
                 continue
@@ -229,18 +279,33 @@ class DualAPIStockFetcher:
                 "fbs_warehouses_count": 2
             }
         """
-        stocks = self.get_combined_stocks_by_article()
-        
-        total_fbo = sum(s['fbo_stock'] for s in stocks.values())
-        total_fbs = sum(s['fbs_stock'] for s in stocks.values())
-        
-        return {
-            'total_fbo': total_fbo,
-            'total_fbs': total_fbs,
-            'total': total_fbo + total_fbs,
-            'articles_count': len(stocks),
-            'fbs_warehouses_count': len(self.get_fbs_warehouses())
-        }
+        try:
+            stocks = self.get_combined_stocks_by_article()
+            
+            # Validate stocks is a dictionary
+            if not isinstance(stocks, dict):
+                logger.error(f"get_combined_stocks_by_article returned non-dict: {type(stocks)}")
+                stocks = {}
+            
+            total_fbo = sum(s.get('fbo_stock', 0) for s in stocks.values() if isinstance(s, dict))
+            total_fbs = sum(s.get('fbs_stock', 0) for s in stocks.values() if isinstance(s, dict))
+            
+            return {
+                'total_fbo': total_fbo,
+                'total_fbs': total_fbs,
+                'total': total_fbo + total_fbs,
+                'articles_count': len(stocks),
+                'fbs_warehouses_count': len(self.get_fbs_warehouses())
+            }
+        except Exception as e:
+            logger.error(f"Error in get_all_stocks_summary: {e}")
+            return {
+                'total_fbo': 0,
+                'total_fbs': 0,
+                'total': 0,
+                'articles_count': 0,
+                'fbs_warehouses_count': 0
+            }
 
 
 def test_dual_api():
