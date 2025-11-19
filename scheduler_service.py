@@ -11,6 +11,7 @@ Railway.app Scheduler Service
 import asyncio
 import os
 import sys
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,14 +26,29 @@ script_dir = Path(__file__).parent.absolute()
 os.chdir(script_dir)
 sys.path.insert(0, str(script_dir / 'src'))
 
-from stock_tracker.database.sheets import GoogleSheetsClient
-from stock_tracker.database.operations import SheetsOperations
-from stock_tracker.services.product_service import ProductService
-from stock_tracker.core.models import SyncStatus
-from stock_tracker.utils.logger import get_logger
-from stock_tracker.utils.config import get_config
+print(f"[STARTUP] Python version: {sys.version}")
+print(f"[STARTUP] Working directory: {os.getcwd()}")
+print(f"[STARTUP] Python path: {sys.path[:3]}")
+
+try:
+    from stock_tracker.database.sheets import GoogleSheetsClient
+    from stock_tracker.database.operations import SheetsOperations
+    from stock_tracker.services.product_service import ProductService
+    from stock_tracker.core.models import SyncStatus
+    from stock_tracker.utils.logger import get_logger
+    from stock_tracker.utils.config import get_config
+    print("[STARTUP] ✅ All modules imported successfully")
+except ImportError as e:
+    print(f"[STARTUP] ❌ Import error: {e}")
+    traceback.print_exc()
+    sys.exit(1)
 
 logger = get_logger(__name__)
+logger.info("=" * 70)
+logger.info("📦 Scheduler Service Starting...")
+logger.info(f"Python: {sys.version}")
+logger.info(f"Working Directory: {os.getcwd()}")
+logger.info("=" * 70)
 
 
 async def run_update():
@@ -190,15 +206,32 @@ async def scheduler_loop():
 
 
 if __name__ == "__main__":
+    print("[MAIN] Starting scheduler service...")
     try:
+        # Проверка переменных окружения
+        required_vars = ['WILDBERRIES_API_KEY', 'GOOGLE_SHEETS_ID']
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+        
+        if missing_vars:
+            print(f"[MAIN] ❌ Missing environment variables: {', '.join(missing_vars)}")
+            logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+            sys.exit(1)
+        
+        print(f"[MAIN] ✅ Environment variables OK")
+        logger.info("✅ Environment variables validated")
+        
         # Запуск основного цикла
+        print("[MAIN] Starting scheduler loop...")
         asyncio.run(scheduler_loop())
         
     except KeyboardInterrupt:
+        print("[MAIN] Keyboard interrupt received")
         logger.info("⏹️  Scheduler остановлен пользователем")
         sys.exit(0)
         
     except Exception as e:
+        print(f"[MAIN] ❌ Critical error: {e}")
+        traceback.print_exc()
         logger.error(f"❌ Критическая ошибка при запуске: {e}")
         logger.exception("Детали:")
         sys.exit(1)
