@@ -65,17 +65,29 @@ async def run_update():
     
     try:
         # Загрузка конфигурации
+        logger.info("📝 Загрузка конфигурации...")
         config = get_config()
         logger.info("✅ Конфигурация загружена успешно")
         
         # Инициализация клиентов
         logger.info("📊 Подключение к Google Sheets...")
-        sheets_client = GoogleSheetsClient(
-            service_account_path=config.google_sheets.service_account_key_path,
-            sheet_id=config.google_sheets.sheet_id
-        )
+        try:
+            sheets_client = GoogleSheetsClient(
+                service_account_path=config.google_sheets.service_account_key_path,
+                sheet_id=config.google_sheets.sheet_id
+            )
+            logger.info("✅ Google Sheets client инициализирован")
+        except Exception as e:
+            logger.error(f"❌ Ошибка подключения к Google Sheets: {e}")
+            raise
         
-        product_service = ProductService(config=config)
+        logger.info("🔧 Инициализация ProductService...")
+        try:
+            product_service = ProductService(config=config)
+            logger.info("✅ ProductService инициализирован")
+        except Exception as e:
+            logger.error(f"❌ Ошибка инициализации ProductService: {e}")
+            raise
         
         logger.info("✅ Подключение к Google Sheets установлено")
         
@@ -130,9 +142,18 @@ async def scheduler_loop():
     logger.info("🔄 Режим: непрерывная работа 24/7")
     logger.info("=" * 70)
     
-    # Запуск при старте сервиса
-    logger.info("🔄 Выполнение первоначального обновления при запуске сервиса...")
-    await run_update()
+    # Запуск при старте сервиса (опционально, если установлена переменная)
+    run_on_start = os.getenv('RUN_ON_START', 'false').lower() == 'true'
+    
+    if run_on_start:
+        logger.info("🔄 Выполнение первоначального обновления при запуске сервиса...")
+        try:
+            await run_update()
+        except Exception as e:
+            logger.error(f"❌ Ошибка при первоначальном обновлении: {e}")
+            logger.exception("Детали:")
+    else:
+        logger.info("⏭️  Пропуск первоначального обновления (RUN_ON_START=false)")
     
     # Основной цикл
     while True:
@@ -205,15 +226,25 @@ async def scheduler_loop():
     logger.info("=" * 70)
 
 
-if __name__ == "__main__":
-    print("[MAIN] Starting scheduler service...")
+def main():
+    """Main entry point with comprehensive error handling"""
+    print("[MAIN] ========================================")
+    print("[MAIN] Stock Tracker Scheduler Service v2.0")
+    print("[MAIN] ========================================")
+    print(f"[MAIN] Python: {sys.version}")
+    print(f"[MAIN] Platform: {sys.platform}")
+    print(f"[MAIN] CWD: {os.getcwd()}")
+    print("[MAIN] ========================================")
+    
     try:
         # Проверка переменных окружения
+        print("[MAIN] Checking environment variables...")
         required_vars = ['WILDBERRIES_API_KEY', 'GOOGLE_SHEETS_ID']
         missing_vars = [var for var in required_vars if not os.getenv(var)]
         
         if missing_vars:
             print(f"[MAIN] ❌ Missing environment variables: {', '.join(missing_vars)}")
+            print(f"[MAIN] Available vars: {list(os.environ.keys())[:10]}...")
             logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
             sys.exit(1)
         
@@ -222,16 +253,35 @@ if __name__ == "__main__":
         
         # Запуск основного цикла
         print("[MAIN] Starting scheduler loop...")
-        asyncio.run(scheduler_loop())
+        logger.info("🚀 Starting scheduler loop...")
+        
+        # Try asyncio.run (Python 3.7+)
+        try:
+            asyncio.run(scheduler_loop())
+        except AttributeError:
+            # Fallback for older Python versions
+            print("[MAIN] Using fallback asyncio.get_event_loop()")
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(scheduler_loop())
         
     except KeyboardInterrupt:
-        print("[MAIN] Keyboard interrupt received")
+        print("\n[MAIN] Keyboard interrupt received")
         logger.info("⏹️  Scheduler остановлен пользователем")
         sys.exit(0)
         
     except Exception as e:
-        print(f"[MAIN] ❌ Critical error: {e}")
+        print(f"\n[MAIN] ❌ CRITICAL ERROR: {e}")
+        print("[MAIN] Traceback:")
         traceback.print_exc()
-        logger.error(f"❌ Критическая ошибка при запуске: {e}")
-        logger.exception("Детали:")
+        
+        try:
+            logger.error(f"❌ Критическая ошибка при запуске: {e}")
+            logger.exception("Детали:")
+        except:
+            pass  # Logger может не работать
+        
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
