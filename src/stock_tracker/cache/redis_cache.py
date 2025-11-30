@@ -267,19 +267,54 @@ class RedisCache:
 
 # Global cache instance
 _cache_instance: Optional[RedisCache] = None
+_cache_available: bool = True
+
+
+class NoOpCache:
+    """Fallback cache that does nothing when Redis is unavailable."""
+    
+    def get(self, tenant_id: str, key: str) -> None:
+        return None
+    
+    def set(self, tenant_id: str, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+        return True
+    
+    def delete(self, tenant_id: str, key: str) -> bool:
+        return True
+    
+    def exists(self, tenant_id: str, key: str) -> bool:
+        return False
+    
+    def ping(self) -> bool:
+        return False
+    
+    def close(self):
+        pass
 
 
 def get_cache() -> RedisCache:
     """
     Get or create global Redis cache instance.
+    Falls back to NoOpCache if Redis is unavailable.
     
     Returns:
-        RedisCache instance
+        RedisCache instance or NoOpCache fallback
     """
-    global _cache_instance
+    global _cache_instance, _cache_available
     
     if _cache_instance is None:
-        _cache_instance = RedisCache()
+        if _cache_available:
+            try:
+                _cache_instance = RedisCache()
+                # Test connection
+                if not _cache_instance.ping():
+                    raise Exception("Redis ping failed")
+            except Exception as e:
+                logger.warning(f"Redis unavailable, using NoOp cache: {e}")
+                _cache_available = False
+                _cache_instance = NoOpCache()
+        else:
+            _cache_instance = NoOpCache()
     
     return _cache_instance
 

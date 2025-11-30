@@ -39,14 +39,33 @@ class RedisRateLimiter:
         """
         self.cache = get_cache() if not redis_client else None
         self.redis_client = redis_client
+        self._redis_available = None
     
-    def _get_redis(self) -> Redis:
-        """Get Redis connection."""
+    def _get_redis(self) -> Optional[Redis]:
+        """Get Redis connection or None if unavailable."""
         if self.redis_client:
             return self.redis_client
-        if self.cache:
+        if self.cache and hasattr(self.cache, 'client'):
             return self.cache.client
-        raise RuntimeError("No Redis connection available")
+        return None
+    
+    def _is_redis_available(self) -> bool:
+        """Check if Redis is available."""
+        if self._redis_available is not None:
+            return self._redis_available
+        
+        redis = self._get_redis()
+        if redis is None:
+            self._redis_available = False
+            return False
+        
+        try:
+            redis.ping()
+            self._redis_available = True
+        except Exception:
+            self._redis_available = False
+        
+        return self._redis_available
     
     def check_rate_limit(
         self,
@@ -68,6 +87,11 @@ class RedisRateLimiter:
                 - remaining: Number of requests remaining in window
                 - reset_time: Unix timestamp when window resets
         """
+        # If Redis is unavailable, allow all requests
+        if not self._is_redis_available():
+            now = time.time()
+            return (True, limit, int(now + window_seconds))
+        
         redis = self._get_redis()
         now = time.time()
         window_start = now - window_seconds
