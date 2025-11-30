@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
-Minimal test script to diagnose Railway startup issues
+Startup test script to verify Stock Tracker API components.
 """
 
 import sys
 import os
 import time
+from pathlib import Path
+
+# Add src to path
+project_root = Path(__file__).parent
+sys.path.insert(0, str(project_root / "src"))
 
 print("=" * 80)
-print("TEST STARTUP SCRIPT")
+print("STOCK TRACKER API - STARTUP TEST")
 print("=" * 80)
 print(f"Python version: {sys.version}")
 print(f"Python executable: {sys.executable}")
@@ -17,14 +22,23 @@ print(f"Current directory: {os.getcwd()}")
 print(f"Script location: {__file__}")
 print("=" * 80)
 
-print("\n[1/5] Checking environment variables...")
-env_vars = ['WILDBERRIES_API_KEY', 'GOOGLE_SHEET_ID', 'GOOGLE_SERVICE_ACCOUNT']
+print("\n[1/6] Checking environment variables...")
+env_vars = ['DATABASE_URL', 'SECRET_KEY', 'ENCRYPTION_MASTER_KEY']
+legacy_vars = ['WILDBERRIES_API_KEY', 'GOOGLE_SHEET_ID']
+print("  Multi-tenant variables:")
 for var in env_vars:
     value = os.getenv(var)
     if value:
         print(f"  ✅ {var}: {'*' * 20} (set)")
     else:
-        print(f"  ❌ {var}: NOT SET")
+        print(f"  ⚠️  {var}: NOT SET (required for multi-tenant)")
+print("  Legacy variables:")
+for var in legacy_vars:
+    value = os.getenv(var)
+    if value:
+        print(f"  ℹ️  {var}: {'*' * 20} (set - for migration)")
+    else:
+        print(f"  ℹ️  {var}: NOT SET")
 
 print("\n[2/5] Checking directory structure...")
 expected_dirs = ['src', 'src/stock_tracker', 'logs']

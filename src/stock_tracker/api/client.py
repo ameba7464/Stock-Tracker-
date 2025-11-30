@@ -59,14 +59,22 @@ class WildberriesAPIClient:
             api_key: Wildberries API key for Analytics category
             base_url: Base URL for seller analytics API v2
         """
-        self.config = get_config()
-        
-        self.api_key = api_key or self.config.wildberries.api_key
-        # Use analytics API for v2 endpoints
-        self.base_url = base_url or "https://seller-analytics-api.wildberries.ru"
-        self.timeout = self.config.wildberries.timeout
-        self.max_retries = self.config.wildberries.retry_count
-        self.retry_delay = self.config.wildberries.retry_delay
+        # Multi-tenant mode: use provided api_key without config
+        if api_key:
+            self.api_key = api_key
+            self.base_url = base_url or "https://seller-analytics-api.wildberries.ru"
+            self.timeout = 30
+            self.max_retries = 3
+            self.retry_delay = 1
+            self.config = None
+        else:
+            # Legacy mode: load from config
+            self.config = get_config()
+            self.api_key = self.config.wildberries.api_key
+            self.base_url = base_url or "https://seller-analytics-api.wildberries.ru"
+            self.timeout = self.config.wildberries.timeout
+            self.max_retries = self.config.wildberries.retry_count
+            self.retry_delay = self.config.wildberries.retry_delay
         
         # Analytics API v2 has stricter rate limits: 3 requests/minute, 20 second intervals  
         rate_limit_config = configure_wildberries_rate_limits()

@@ -14,6 +14,8 @@ from collections import defaultdict
 import asyncio
 import uuid
 
+from sqlalchemy.orm import Session
+
 from stock_tracker.api.client import WildberriesAPIClient
 from stock_tracker.core.models import Product, Warehouse, SyncSession
 from stock_tracker.core.validator import DataValidator
@@ -26,6 +28,11 @@ from stock_tracker.utils.config import get_config
 from stock_tracker.utils.logger import get_logger
 from stock_tracker.utils.exceptions import SyncError, ValidationError, APIError
 from stock_tracker.utils.warehouse_mapper import normalize_warehouse_name
+
+# Multi-tenant imports
+from stock_tracker.database.models import Tenant
+from stock_tracker.marketplaces.factory import create_marketplace_client
+from stock_tracker.cache.redis_cache import RedisCache, get_cache, cached
 
 
 # Module constants
@@ -41,19 +48,50 @@ class ProductService:
     
     Orchestrates all product-related operations including API synchronization,
     data validation, calculations, and Google Sheets management.
+    
+    Multi-tenant architecture:
+    - Uses tenant-specific marketplace credentials from database
+    - Supports Redis caching with tenant isolation
+    - Integrates with Celery for background sync tasks
     """
     
-    def __init__(self, config=None):
+    def __init__(
+        self, 
+        tenant: Optional[Tenant] = None,
+        db_session: Optional[Session] = None,
+        cache: Optional[RedisCache] = None,
+        config=None
+    ):
         """
-        Initialize service with configuration.
+        Initialize service with tenant context (multi-tenant mode) or legacy config.
         
         Args:
-            config: Optional configuration override
+            tenant: Tenant instance for multi-tenant mode (preferred)
+            db_session: Database session for tenant operations
+            cache: Redis cache instance (optional, will create if not provided)
+            config: Legacy configuration (deprecated, for backward compatibility)
         """
+        # Multi-tenant or legacy mode
+        self.tenant = tenant
+        self.db_session = db_session
+        self.cache = cache or get_cache()
         self.config = config or get_config()
         
-        # Initialize clients
-        self.wb_client = WildberriesAPIClient()  # Uses config internally
+        # Initialize marketplace client (tenant-aware or legacy)
+        if self.tenant:
+            # Multi-tenant: get credentials from database
+            self.marketplace_client = create_marketplace_client(self.tenant)
+            logger.info(
+                f"ProductService initialized for tenant {self.tenant.id} "
+                f"({self.tenant.company_name}) with {self.tenant.marketplace_type}"
+            )
+        else:
+            # Legacy: use hardcoded config
+            self.wb_client = WildberriesAPIClient()  # Uses config internally
+            self.marketplace_client = None
+            logger.warning("ProductService initialized in legacy mode (no tenant)")
+        
+        # Initialize Google Sheets client
         self.sheets_client = GoogleSheetsClient()  # Uses config internally
         self.operations = SheetsOperations(self.sheets_client)
         
@@ -65,8 +103,14 @@ class ProductService:
         # Initialize warehouse classifier (will be built on first use)
         self.warehouse_classifier: Optional[WarehouseClassifier] = None
         
-        # Initialize dual-API stock fetcher for FBO+FBS stocks
-        self.dual_api_fetcher = DualAPIStockFetcher(self.config.wildberries_api_key)
+        # Initialize dual-API stock fetcher
+        if self.tenant:
+            # Multi-tenant: use marketplace_client's credentials
+            api_key = self.marketplace_client.credentials.api_key if self.marketplace_client else None
+            self.dual_api_fetcher = DualAPIStockFetcher(api_key) if api_key else None
+        else:
+            # Legacy: use config
+            self.dual_api_fetcher = DualAPIStockFetcher(self.config.wildberries_api_key)
         
         logger.info("ProductService initialized with Dual API support (FBO+FBS)")
     
@@ -183,19 +227,54 @@ class ProductService:
                 raise
             raise SyncError(f"Product update failed: {e}")
     
-    async def sync_all_products(self) -> SyncSession:
+    def _get_api_client(self) -> WildberriesAPIClient:
+        """
+        Get API client (multi-tenant or legacy).
+        
+        Returns:
+            WildberriesAPIClient instance
+        """
+        if self.marketplace_client:
+            # Multi-tenant: use marketplace_client's underlying API client
+            if hasattr(self.marketplace_client, 'api_client'):
+                return self.marketplace_client.api_client
+            # Fallback: marketplace_client is the API client
+            return self.marketplace_client
+        else:
+            # Legacy: use wb_client
+            return self.wb_client
+    
+    async def sync_all_products(self) -> dict:
         """
         Synchronize all products with Wildberries API.
         
+        Multi-tenant mode: Uses cached results with tenant isolation.
+        Legacy mode: Returns SyncSession for backward compatibility.
+        
         Returns:
-            SyncSession with results summary
+            dict with sync statistics:
+                - products_synced: Number of products synced
+                - updated_count: Products successfully updated
+                - error_count: Products with errors
+                - duration_seconds: Sync duration
+                - errors: List of error messages
             
         Raises:
             SyncError: If synchronization fails
         """
+        start_time = datetime.now()
+        
+        # Multi-tenant: check cache first
+        if self.tenant and self.cache:
+            cache_key = "sync_all_products"
+            cached_result = self.cache.get(str(self.tenant.id), cache_key)
+            if cached_result:
+                logger.info(f"Returning cached sync result for tenant {self.tenant.id}")
+                return cached_result
+        
         sync_session = SyncSession(
             session_id=str(uuid.uuid4()),
-            start_time=datetime.now()
+            start_time=start_time
         )
         
         try:
@@ -210,11 +289,24 @@ class ProductService:
             if not products:
                 logger.info("No products found for synchronization")
                 sync_session.complete()
-                return sync_session
+                result = {
+                    "products_synced": 0,
+                    "updated_count": 0,
+                    "error_count": 0,
+                    "duration_seconds": (datetime.now() - start_time).total_seconds(),
+                    "errors": [],
+                }
+                
+                # Cache result
+                if self.tenant and self.cache:
+                    self.cache.set(str(self.tenant.id), cache_key, result, ttl=300)
+                
+                return result
             
             # Sync each product
             updated_count = 0
             error_count = 0
+            errors = []
             
             for product in products:
                 try:
@@ -232,12 +324,16 @@ class ProductService:
                         sync_session.products_processed += 1
                     else:
                         error_count += 1
-                        sync_session.add_error(f"Failed to update {product.seller_article}")
+                        error_msg = f"Failed to update {product.seller_article}"
+                        sync_session.add_error(error_msg)
+                        errors.append(error_msg)
                         
                 except Exception as e:
                     error_count += 1
-                    sync_session.add_error(f"Error syncing {product.seller_article}: {e}")
-                    logger.warning(f"Failed to sync product {product.seller_article}: {e}")
+                    error_msg = f"Error syncing {product.seller_article}: {e}"
+                    sync_session.add_error(error_msg)
+                    errors.append(error_msg)
+                    logger.warning(error_msg)
             
             # Complete session
             success = error_count == 0
@@ -246,8 +342,22 @@ class ProductService:
             else:
                 sync_session.fail("Some products failed to sync")
             
-            logger.info(f"Synchronization completed: {updated_count} updated, {error_count} errors")
-            return sync_session
+            duration = (datetime.now() - start_time).total_seconds()
+            logger.info(f"Synchronization completed: {updated_count} updated, {error_count} errors in {duration:.2f}s")
+            
+            result = {
+                "products_synced": len(products),
+                "updated_count": updated_count,
+                "error_count": error_count,
+                "duration_seconds": duration,
+                "errors": errors[:10],  # Limit to first 10 errors
+            }
+            
+            # Cache result (only if successful or partial success)
+            if self.tenant and self.cache and updated_count > 0:
+                self.cache.set(str(self.tenant.id), cache_key, result, ttl=300)
+            
+            return result
             
         except Exception as e:
             sync_session.add_error(f"Synchronization failed: {e}")
@@ -284,8 +394,9 @@ class ProductService:
             # Step 0: Initialize warehouse classifier if not already done
             if not self.warehouse_classifier:
                 logger.info("Initializing warehouse classifier...")
+                api_client = self._get_api_client()
                 self.warehouse_classifier = await create_warehouse_classifier(
-                    self.wb_client,
+                    api_client,
                     days=90,  # Analyze last 90 days of orders
                     auto_build=True
                 )
@@ -295,7 +406,8 @@ class ProductService:
             
             # Step 1: Fetch warehouse remains (stocks) from V1 API
             logger.info("Fetching warehouse remains (stocks) from V1 API...")
-            task_id = await self.wb_client.create_warehouse_remains_task()
+            api_client = self._get_api_client()
+            task_id = await api_client.create_warehouse_remains_task()
             logger.info(f"Created warehouse remains task: {task_id}")
             
             # Wait for task processing
@@ -303,7 +415,7 @@ class ProductService:
             await asyncio.sleep(WAREHOUSE_TASK_WAIT_SECONDS)
             
             # Download warehouse remains (stocks only!)
-            warehouse_remains = await self.wb_client.download_warehouse_remains(task_id)
+            warehouse_remains = await api_client.download_warehouse_remains(task_id)
             logger.info(f"Downloaded {len(warehouse_remains)} products from V1 warehouse API")
             
             # ИСПРАВЛЕНО 27.10.2025 21:35 - КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ!
@@ -322,7 +434,8 @@ class ProductService:
             logger.info("Fetching orders data from supplier/orders endpoint...")
             from stock_tracker.api.products import WildberriesProductDataFetcher
             
-            data_fetcher = WildberriesProductDataFetcher(self.wb_client)
+            api_client = self._get_api_client()
+            data_fetcher = WildberriesProductDataFetcher(api_client)
             
             # Calculate date_from as ORDER_LOOKBACK_DAYS ago
             date_from = (datetime.now() - timedelta(days=ORDER_LOOKBACK_DAYS)).strftime("%Y-%m-%dT00:00:00")
@@ -1275,11 +1388,14 @@ class ProductService:
         try:
             logger.debug(f"Syncing product {product.seller_article} from API")
             
+            # Get API client (multi-tenant or legacy)
+            api_client = self._get_api_client()
+            
             # Get warehouse remains
-            remains_data = await self.wb_client.get_warehouse_remains()
+            remains_data = await api_client.get_warehouse_remains()
             
             # Get orders data  
-            orders_data = await self.wb_client.get_supplier_orders()
+            orders_data = await api_client.get_supplier_orders()
             
             # Clear existing warehouses
             product.warehouses.clear()

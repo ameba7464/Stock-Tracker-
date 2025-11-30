@@ -1,0 +1,265 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: stock-tracker-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stock_tracker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stock_tracker_password}
+      POSTGRES_DB: ${POSTGRES_DB:-stock_tracker}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-stock_tracker}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - stock-tracker-network
+
+  # Redis (Cache & Celery Broker)
+  redis:
+    image: redis:7-alpine
+    container_name: stock-tracker-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - stock-tracker-network
+
+  # FastAPI Web Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: stock-tracker-api
+    command: uvicorn stock_tracker.api.main:app --host 0.0.0.0 --port 8000 --workers 4
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-stock_tracker}:${POSTGRES_PASSWORD:-stock_tracker_password}@postgres:5432/${POSTGRES_DB:-stock_tracker}
+      
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      
+      # Security
+      SECRET_KEY: ${SECRET_KEY}
+      FERNET_KEY: ${FERNET_KEY}
+      ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:-${FERNET_KEY}}
+      
+      # API
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:8000}
+      
+      # Monitoring
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${ENVIRONMENT:-production}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+      
+      # Rate Limiting
+      RATE_LIMIT_GLOBAL: ${RATE_LIMIT_GLOBAL:-1000}
+      RATE_LIMIT_TENANT: ${RATE_LIMIT_TENANT:-100}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - stock-tracker-network
+    restart: unless-stopped
+
+  # Celery Worker (Background Tasks)
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: stock-tracker-worker
+    command: celery -A stock_tracker.workers.celery_app worker --loglevel=info --concurrency=4 --queues=sync,default
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-stock_tracker}:${POSTGRES_PASSWORD:-stock_tracker_password}@postgres:5432/${POSTGRES_DB:-stock_tracker}
+      
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      
+      # Security
+      SECRET_KEY: ${SECRET_KEY}
+      FERNET_KEY: ${FERNET_KEY}
+      ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:-${FERNET_KEY}}
+      
+      # Monitoring
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_ENVIRONMENT: ${ENVIRONMENT:-production}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - stock-tracker-network
+    restart: unless-stopped
+
+  # Celery Beat (Scheduler)
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: stock-tracker-beat
+    command: celery -A stock_tracker.workers.celery_app beat --loglevel=info
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-stock_tracker}:${POSTGRES_PASSWORD:-stock_tracker_password}@postgres:5432/${POSTGRES_DB:-stock_tracker}
+      
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      
+      # Security
+      SECRET_KEY: ${SECRET_KEY}
+      FERNET_KEY: ${FERNET_KEY}
+      ENCRYPTION_MASTER_KEY: ${ENCRYPTION_MASTER_KEY:-${FERNET_KEY}}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - stock-tracker-network
+    restart: unless-stopped
+
+  # Flower (Celery Monitoring)
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: stock-tracker-flower
+    command: celery -A stock_tracker.workers.celery_app flower --port=5555
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+    ports:
+      - "5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - stock-tracker-network
+    restart: unless-stopped
+
+  # Prometheus (Metrics Collection)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: stock-tracker-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - stock-tracker-network
+    restart: unless-stopped
+
+  # Grafana (Metrics Visualization)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: stock-tracker-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: redis-datasource
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - stock-tracker-network
+    restart: unless-stopped
+
+  # Nginx (Reverse Proxy - Optional for production)
+  nginx:
+    image: nginx:alpine
+    container_name: stock-tracker-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - api
+    networks:
+      - stock-tracker-network
+    restart: unless-stopped
+    profiles:
+      - production
+
+  # Telegram Bot
+  telegram-bot:
+    build:
+      context: ./telegram-bot
+      dockerfile: Dockerfile
+    container_name: stock-tracker-telegram-bot
+    environment:
+      BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      STOCK_TRACKER_API_URL: http://api:8000
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-stock_tracker}:${POSTGRES_PASSWORD:-stock_tracker_password}@postgres:5432/${POSTGRES_DB:-stock_tracker}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks:
+      - stock-tracker-network
+    restart: unless-stopped
+    profiles:
+      - bot
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  stock-tracker-network:
+    driver: bridge

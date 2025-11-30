@@ -1,0 +1,688 @@
+"""Сервис для работы с Google Sheets API."""
+from typing import Optional, List, Dict, Any
+from pathlib import Path
+import json
+import os
+
+from app.utils.logger import logger
+from app.config import settings
+
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+    from google.oauth2.credentials import Credentials as OAuthCredentials
+    from google.auth.transport.requests import Request
+    GOOGLE_AVAILABLE = True
+except ImportError:
+    GOOGLE_AVAILABLE = False
+    logger.warning("Google API libraries not installed. Install: pip install gspread google-auth")
+
+
+class GoogleSheetsService:
+    """Сервис для работы с Google Sheets API."""
+    
+    SCOPES = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive'
+    ]
+    
+    def __init__(self):
+        """Инициализация сервиса."""
+        self.client = None
+        self.oauth_client = None  # Клиент для создания файлов через OAuth
+        self._initialize()
+    
+    def _initialize(self):
+        """Инициализация Google API клиента."""
+        if not GOOGLE_AVAILABLE:
+            logger.error("Google API libraries not available")
+            return
+        
+        try:
+            # 1. Инициализация Service Account (для обновления таблиц)
+            credentials_path = self._find_credentials_file()
+            
+            if not credentials_path:
+                logger.warning("Google Service Account credentials not found. Please add credentials.json")
+                return
+            
+            # Создаем Service Account credentials
+            sa_credentials = ServiceAccountCredentials.from_service_account_file(
+                credentials_path,
+                scopes=self.SCOPES
+            )
+            
+            # Создаем клиент gspread для Service Account
+            self.client = gspread.authorize(sa_credentials)
+            
+            logger.info("Google Sheets service initialized successfully (Service Account)")
+            
+            # 2. Инициализация OAuth (для создания файлов)
+            self._initialize_oauth_client()
+            
+        except Exception as e:
+            logger.error(f"Error initializing Google Sheets service: {e}")
+    
+    def _initialize_oauth_client(self):
+        """Инициализация OAuth клиента для создания файлов."""
+        try:
+            token_path = Path(__file__).parent.parent.parent / "token.json"
+            
+            if not token_path.exists():
+                logger.warning("OAuth token not found. Run get_oauth_token.py to authorize")
+                return
+            
+            # Загружаем OAuth credentials
+            oauth_creds = OAuthCredentials.from_authorized_user_file(
+                str(token_path),
+                scopes=self.SCOPES
+            )
+            
+            # Обновляем токен если истёк
+            if oauth_creds and oauth_creds.expired and oauth_creds.refresh_token:
+                logger.info("Refreshing OAuth token...")
+                oauth_creds.refresh(Request())
+                
+                # Сохраняем обновлённый токен
+                with open(token_path, 'w') as token:
+                    token.write(oauth_creds.to_json())
+            
+            # Создаем OAuth клиент
+            self.oauth_client = gspread.authorize(oauth_creds)
+            
+            logger.info("OAuth client initialized successfully")
+            
+        except Exception as e:
+            logger.warning(f"Could not initialize OAuth client: {e}")
+            logger.warning("Tables will not be created. Run get_oauth_token.py to authorize")
+    
+    def _find_credentials_file(self) -> Optional[str]:
+        """
+        Поиск файла с credentials.
+        
+        Returns:
+            Путь к файлу или None
+        """
+        # Возможные расположения файла
+        possible_paths = [
+            Path(__file__).parent.parent.parent / "credentials.json",
+            Path(__file__).parent.parent.parent / "config" / "credentials.json",
+            Path(__file__).parent.parent.parent / ".credentials" / "credentials.json",
+        ]
+        
+        for path in possible_paths:
+            if path.exists():
+                logger.info(f"Found credentials file: {path}")
+                return str(path)
+        
+        return None
+    
+    async def create_sheet(
+        self,
+        user_name: str,
+        telegram_id: int,
+        data: List[Any]
+    ) -> Optional[str]:
+        """
+        Создание новой Google Таблицы для пользователя.
+        
+        Args:
+            user_name: Имя пользователя
+            telegram_id: Telegram ID пользователя
+            data: Данные для заполнения (список ProductMetrics)
+            
+        Returns:
+            ID созданной таблицы или None
+        """
+        if not self.oauth_client:
+            logger.error("OAuth client not initialized. Cannot create sheets.")
+            logger.error("Run get_oauth_token.py to authorize")
+            return None
+        
+        try:
+            # Создаем таблицу через OAuth (от имени владельца)
+            title = f'Stock Tracker - {user_name}'
+            
+            # Если указана папка, создаём в ней
+            if settings.google_drive_folder_id:
+                logger.info(f"Creating sheet in folder: {settings.google_drive_folder_id}")
+                spreadsheet = self.oauth_client.create(title, folder_id=settings.google_drive_folder_id)
+            else:
+                spreadsheet = self.oauth_client.create(title)
+            
+            sheet_id = spreadsheet.id
+            logger.info(f"Created new sheet: {sheet_id}")
+            
+            # Переименовываем первый лист в "Stock Tracker"
+            worksheet = spreadsheet.sheet1
+            worksheet.update_title("Stock Tracker")
+            logger.info("Renamed sheet to 'Stock Tracker'")
+            
+            # Даем доступ Service Account для обновлений
+            try:
+                spreadsheet.share(
+                    'stocktr@stocktr-479319.iam.gserviceaccount.com',
+                    perm_type='user',
+                    role='writer',
+                    notify=False
+                )
+                logger.info("Shared sheet with Service Account")
+            except Exception as e:
+                logger.warning(f"Could not share with Service Account: {e}")
+            
+            # Даем доступ всем по ссылке
+            spreadsheet.share('', perm_type='anyone', role='writer')
+            logger.info(f"Permissions set for sheet {sheet_id}")
+            
+            # Заполняем данными (через Service Account или OAuth)
+            await self.update_sheet(sheet_id, data)
+            
+            return sheet_id
+            
+        except gspread.exceptions.APIError as e:
+            logger.error(f"API error creating sheet: {e}")
+            logger.error("\n⚠️ ВОЗМОЖНЫЕ ПРИЧИНЫ:\n"
+                        "1. OAuth токен истёк - запустите get_oauth_token.py\n"
+                        "2. Google Sheets API не включен\n"
+                        "3. Google Drive API не включен\n"
+                        "4. Нет прав на создание файлов\n"
+                        "\nПроверьте: https://console.cloud.google.com/apis/dashboard")
+            return None
+        except Exception as e:
+            logger.error(f"Error creating sheet: {e}", exc_info=True)
+            return None
+    
+    async def update_sheet(
+        self,
+        sheet_id: str,
+        data: List[Any]
+    ) -> bool:
+        """
+        Обновление существующей таблицы.
+        
+        Args:
+            sheet_id: ID таблицы
+            data: Данные для обновления (список ProductMetrics)
+            
+        Returns:
+            True если успешно
+        """
+        if not self.client:
+            logger.error("Google Sheets service not initialized")
+            return False
+        
+        try:
+            # Открываем таблицу
+            spreadsheet = self.client.open_by_key(sheet_id)
+            
+            # Переименовываем первый лист в "Stock Tracker" если нужно
+            worksheet = spreadsheet.sheet1
+            if worksheet.title != "Stock Tracker":
+                worksheet.update_title("Stock Tracker")
+            
+            # Преобразуем данные в формат для таблицы
+            table_data = self._prepare_table_data(data)
+            
+            # Очищаем и записываем новые данные
+            worksheet.clear()
+            worksheet.update('A1', table_data, value_input_option='USER_ENTERED')
+            
+            # Форматируем таблицу
+            await self._format_sheet(spreadsheet, worksheet)
+            
+            logger.info(f"Sheet {sheet_id} updated successfully")
+            return True
+            
+        except gspread.exceptions.APIError as e:
+            logger.error(f"API error updating sheet: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Error updating sheet: {e}", exc_info=True)
+            return False
+    
+    def _prepare_table_data(self, products: List[Any]) -> List[List[Any]]:
+        """
+        Подготовка данных для таблицы.
+        
+        Args:
+            products: Список ProductMetrics
+            
+        Returns:
+            Список списков для Google Sheets
+        """
+        if not products:
+            return [["Нет данных"]]
+        
+        # Получаем все уникальные склады
+        all_warehouses = set()
+        service_warehouses = {
+            'В пути до получателей',
+            'В пути возвраты на склад WB',
+            'Всего находится на складах',
+            'Остальные'
+        }
+        
+        for product in products:
+            for wh in product.stocks_by_warehouse.keys():
+                if wh not in service_warehouses:
+                    all_warehouses.add(wh)
+            for wh in product.orders_by_warehouse.keys():
+                if wh not in service_warehouses:
+                    all_warehouses.add(wh)
+        
+        all_warehouses = sorted(all_warehouses)
+        
+        # Строка 1: Группы колонок
+        header_row1 = ['', '', '', '']  # Основная информация
+        header_row1.extend([''] * 6)     # Общие метрики
+        
+        for warehouse in all_warehouses:
+            header_row1.extend([warehouse, '', ''])
+        
+        # Строка 2: Названия колонок
+        header_row2 = [
+            'Бренд',
+            'Предмет',
+            'Артикул продавца',
+            'Артикул товара (nmid)',
+            'В пути до покупателя',
+            'В пути конв. на склад WB',
+            'Всего заказов на складах WB',
+            'Заказы (всего)',
+            'Остатки (всего)',
+            'Оборачиваемость (дни)'
+        ]
+        
+        for _ in all_warehouses:
+            header_row2.extend(['Остатки', 'Заказы', 'Оборач.'])
+        
+        # Данные
+        rows = [header_row1, header_row2]
+        
+        for product in products:
+            row = [
+                product.brand,
+                product.subject,
+                product.vendor_code,
+                product.nm_id,
+                product.in_transit_to_customer,
+                product.in_transit_to_wb_warehouse,
+                product.orders_wb_warehouses,
+                product.orders_total,
+                product.stocks_total,
+                product.turnover_days
+            ]
+            
+            # Добавляем данные по складам
+            for warehouse in all_warehouses:
+                stocks = product.stocks_by_warehouse.get(warehouse, 0)
+                orders = product.orders_by_warehouse.get(warehouse, 0)
+                
+                # Рассчитываем оборачиваемость
+                if orders > 0 and stocks > 0:
+                    turnover = round(stocks / orders, 1)
+                else:
+                    turnover = 0
+                
+                row.extend([stocks, orders, turnover if turnover > 0 else ''])
+            
+            rows.append(row)
+        
+        return rows
+    
+    async def _format_sheet(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet):
+        """
+        Форматирование таблицы (заголовки, цвета, границы, объединение ячеек).
+        
+        Args:
+            spreadsheet: Объект таблицы
+            worksheet: Объект листа
+        """
+        try:
+            # Получаем данные для определения количества строк и колонок
+            all_data = worksheet.get_all_values()
+            data_rows_count = len(all_data) - 2 if len(all_data) > 2 else 0
+            total_cols = len(all_data[0]) if all_data else 10
+            
+            # Определяем количество складов
+            num_warehouses = (total_cols - 10) // 3 if total_cols > 10 else 0
+            
+            # 1. Объединяем ячейки заголовков групп
+            await self._merge_group_headers(spreadsheet, worksheet, num_warehouses)
+            
+            # 2. Устанавливаем размеры колонок и строк
+            await self._apply_dimension_properties(spreadsheet, worksheet, total_cols)
+            
+            # 3. Форматируем заголовки (синий фон, белый текст)
+            worksheet.format('A1:ZZ2', {
+                'backgroundColor': {
+                    'red': 0.4,
+                    'green': 0.49,
+                    'blue': 0.92
+                },
+                'textFormat': {
+                    'bold': True,
+                    'fontSize': 10,
+                    'foregroundColor': {
+                        'red': 1.0,
+                        'green': 1.0,
+                        'blue': 1.0
+                    }
+                },
+                'horizontalAlignment': 'CENTER',
+                'verticalAlignment': 'MIDDLE',
+                'wrapStrategy': 'WRAP'
+            })
+            
+            # 4. Форматируем данные
+            if data_rows_count > 0:
+                # Первые 4 колонки - выравнивание слева
+                worksheet.format(f'A3:D{data_rows_count + 2}', {
+                    'horizontalAlignment': 'LEFT',
+                    'verticalAlignment': 'MIDDLE'
+                })
+                
+                # Остальные колонки - по центру
+                worksheet.format(f'E3:ZZ{data_rows_count + 2}', {
+                    'horizontalAlignment': 'CENTER',
+                    'verticalAlignment': 'MIDDLE'
+                })
+            
+            # 5. Добавляем границы
+            await self._apply_borders(spreadsheet, worksheet, total_cols, data_rows_count, num_warehouses)
+            
+            # 6. Замораживаем заголовки
+            worksheet.freeze(rows=2, cols=0)
+            
+            logger.info(f"Sheet formatted successfully (warehouses: {num_warehouses}, rows: {data_rows_count})")
+            
+        except Exception as e:
+            logger.error(f"Error formatting sheet: {e}", exc_info=True)
+    
+    async def _merge_group_headers(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet, num_warehouses: int):
+        """
+        Объединить ячейки для заголовков групп.
+        
+        Args:
+            spreadsheet: Объект таблицы
+            worksheet: Объект листа
+            num_warehouses: Количество складов
+        """
+        try:
+            merge_requests = []
+            
+            # Основная информация (A1:D1)
+            merge_requests.append({
+                'mergeCells': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 0,
+                        'endRowIndex': 1,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': 4
+                    },
+                    'mergeType': 'MERGE_ALL'
+                }
+            })
+            
+            # Общие метрики (E1:J1)
+            merge_requests.append({
+                'mergeCells': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 0,
+                        'endRowIndex': 1,
+                        'startColumnIndex': 4,
+                        'endColumnIndex': 10
+                    },
+                    'mergeType': 'MERGE_ALL'
+                }
+            })
+            
+            # Склады (каждый склад = 3 колонки)
+            for i in range(num_warehouses):
+                start_col = 10 + (i * 3)
+                end_col = start_col + 3
+                
+                merge_requests.append({
+                    'mergeCells': {
+                        'range': {
+                            'sheetId': worksheet.id,
+                            'startRowIndex': 0,
+                            'endRowIndex': 1,
+                            'startColumnIndex': start_col,
+                            'endColumnIndex': end_col
+                        },
+                        'mergeType': 'MERGE_ALL'
+                    }
+                })
+            
+            # Применяем объединение
+            if merge_requests:
+                spreadsheet.batch_update({'requests': merge_requests})
+            
+            # Записываем текст в объединенные ячейки
+            worksheet.update(values=[['Основная информация']], range_name='A1')
+            worksheet.update(values=[['Общие метрики']], range_name='E1')
+            
+            # Названия складов уже записаны в prepare_table_data
+            
+            logger.debug(f"Merged cells for {num_warehouses} warehouses")
+            
+        except Exception as e:
+            logger.warning(f"Failed to merge cells: {e}")
+    
+    async def _apply_dimension_properties(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet, total_cols: int):
+        """
+        Установить размеры колонок и строк.
+        
+        Args:
+            spreadsheet: Объект таблицы
+            worksheet: Объект листа
+            total_cols: Общее количество колонок
+        """
+        try:
+            requests = []
+            
+            # Основные колонки (A-D)
+            column_widths = [150, 200, 180, 150]
+            for i, width in enumerate(column_widths):
+                requests.append({
+                    'updateDimensionProperties': {
+                        'range': {
+                            'sheetId': worksheet.id,
+                            'dimension': 'COLUMNS',
+                            'startIndex': i,
+                            'endIndex': i + 1
+                        },
+                        'properties': {'pixelSize': width},
+                        'fields': 'pixelSize'
+                    }
+                })
+            
+            # Общие метрики (E-J) - 120px
+            requests.append({
+                'updateDimensionProperties': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'dimension': 'COLUMNS',
+                        'startIndex': 4,
+                        'endIndex': 10
+                    },
+                    'properties': {'pixelSize': 120},
+                    'fields': 'pixelSize'
+                }
+            })
+            
+            # Колонки складов - 90px
+            if total_cols > 10:
+                requests.append({
+                    'updateDimensionProperties': {
+                        'range': {
+                            'sheetId': worksheet.id,
+                            'dimension': 'COLUMNS',
+                            'startIndex': 10,
+                            'endIndex': total_cols
+                        },
+                        'properties': {'pixelSize': 90},
+                        'fields': 'pixelSize'
+                    }
+                })
+            
+            # Высота строк заголовков
+            requests.append({
+                'updateDimensionProperties': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'dimension': 'ROWS',
+                        'startIndex': 0,
+                        'endIndex': 1
+                    },
+                    'properties': {'pixelSize': 35},
+                    'fields': 'pixelSize'
+                }
+            })
+            
+            requests.append({
+                'updateDimensionProperties': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'dimension': 'ROWS',
+                        'startIndex': 1,
+                        'endIndex': 2
+                    },
+                    'properties': {'pixelSize': 40},
+                    'fields': 'pixelSize'
+                }
+            })
+            
+            # Применяем все изменения
+            if requests:
+                spreadsheet.batch_update({'requests': requests})
+            
+            logger.debug("Dimension properties applied")
+            
+        except Exception as e:
+            logger.warning(f"Failed to apply dimension properties: {e}")
+    
+    async def _apply_borders(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet, total_cols: int, data_rows_count: int, num_warehouses: int):
+        """
+        Применить границы к таблице.
+        
+        Args:
+            spreadsheet: Объект таблицы
+            worksheet: Объект листа
+            total_cols: Общее количество колонок
+            data_rows_count: Количество строк с данными
+            num_warehouses: Количество складов
+        """
+        try:
+            border_requests = []
+            
+            # 1. Обычные границы для всех ячеек с данными
+            if data_rows_count > 0:
+                border_requests.append({
+                    'updateBorders': {
+                        'range': {
+                            'sheetId': worksheet.id,
+                            'startRowIndex': 1,
+                            'endRowIndex': data_rows_count + 2,
+                            'startColumnIndex': 0,
+                            'endColumnIndex': total_cols
+                        },
+                        'top': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                        'bottom': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                        'left': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                        'right': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                        'innerHorizontal': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                        'innerVertical': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}}
+                    }
+                })
+            
+            # 2. Толстая горизонтальная граница после заголовков
+            border_requests.append({
+                'updateBorders': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 1,
+                        'endRowIndex': 2,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': total_cols
+                    },
+                    'bottom': {
+                        'style': 'SOLID_THICK',
+                        'width': 3,
+                        'color': {'red': 0.2, 'green': 0.2, 'blue': 0.2}
+                    }
+                }
+            })
+            
+            # 3. Толстые вертикальные границы для разделения секций
+            # После "Основной информации" (колонка D)
+            border_requests.append({
+                'updateBorders': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 0,
+                        'endRowIndex': data_rows_count + 2,
+                        'startColumnIndex': 3,
+                        'endColumnIndex': 4
+                    },
+                    'right': {
+                        'style': 'SOLID_THICK',
+                        'width': 3,
+                        'color': {'red': 0.2, 'green': 0.2, 'blue': 0.2}
+                    }
+                }
+            })
+            
+            # После "Общих метрик" (колонка J)
+            border_requests.append({
+                'updateBorders': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 0,
+                        'endRowIndex': data_rows_count + 2,
+                        'startColumnIndex': 9,
+                        'endColumnIndex': 10
+                    },
+                    'right': {
+                        'style': 'SOLID_THICK',
+                        'width': 3,
+                        'color': {'red': 0.2, 'green': 0.2, 'blue': 0.2}
+                    }
+                }
+            })
+            
+            # Между складами
+            for i in range(num_warehouses - 1):
+                col_index = 10 + (i * 3) + 2
+                border_requests.append({
+                    'updateBorders': {
+                        'range': {
+                            'sheetId': worksheet.id,
+                            'startRowIndex': 0,
+                            'endRowIndex': data_rows_count + 2,
+                            'startColumnIndex': col_index,
+                            'endColumnIndex': col_index + 1
+                        },
+                        'right': {
+                            'style': 'SOLID_THICK',
+                            'width': 3,
+                            'color': {'red': 0.2, 'green': 0.2, 'blue': 0.2}
+                        }
+                    }
+                })
+            
+            # Применяем границы
+            if border_requests:
+                spreadsheet.batch_update({'requests': border_requests})
+            
+            logger.debug("Borders applied")
+            
+        except Exception as e:
+            logger.warning(f"Failed to apply borders: {e}")
+
+
+# Глобальный экземпляр сервиса
+google_sheets_service = GoogleSheetsService()

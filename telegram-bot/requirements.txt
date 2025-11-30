@@ -1,0 +1,27 @@
+# Telegram Bot Framework
+aiogram==3.13.1
+
+# Scheduler
+apscheduler==3.10.4
+
+# Database
+sqlalchemy==2.0.35
+aiosqlite==0.20.0
+greenlet==3.1.1
+alembic==1.13.3
+
+# Configuration
+python-dotenv==1.0.1
+pydantic==2.9.2
+pydantic-settings==2.6.0
+
+# Utilities
+aiofiles==24.1.0
+
+# Google Sheets Integration
+gspread==6.1.4
+google-auth==2.35.0
+
+# Data Processing
+pandas==2.2.3
+requests==2.32.3

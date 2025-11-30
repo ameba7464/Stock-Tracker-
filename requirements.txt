@@ -1,45 +1,86 @@
 # Wildberries Stock Tracker Dependencies
 # Core dependencies for API integration and data processing
 
-# Google Sheets API integration
+# === Database & ORM ===
+sqlalchemy>=2.0.0
+alembic>=1.12.0
+psycopg2-binary>=2.9.9
+
+# === Web Framework & GraphQL ===
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+strawberry-graphql[fastapi]>=0.214.0
+python-multipart>=0.0.6
+
+# === Authentication & Security ===
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.1
+cryptography>=41.0.0
+
+# === Google Sheets API integration ===
 gspread>=6.0.0
 google-auth>=2.23.0
 google-auth-oauthlib>=1.1.0
 google-auth-httplib2>=0.1.1
 
-# HTTP client for Wildberries API
+# === HTTP clients ===
 requests>=2.31.0
 urllib3>=2.0.0
 aiohttp>=3.8.0
+httpx>=0.25.0
 
-# Data validation and models
+# === Data validation and models ===
 pydantic>=2.4.0
 pydantic-settings>=2.0.0
+pydantic[email]>=2.4.0
 
-# Task scheduling for automated sync
+# === Redis & Caching ===
+redis[hiredis]>=5.0.0
+redis-om>=0.2.0
+
+# === Background Tasks ===
+celery[redis]>=5.3.0
+flower>=2.0.0
+
+# === Task scheduling for automated sync ===
 APScheduler>=3.10.0
 
-# Security and encryption
-cryptography>=41.0.0
+# === Security (additional) ===
 keyring>=24.2.0
 
-# Testing framework
+# === Monitoring & Metrics ===
+prometheus-client>=0.19.0
+sentry-sdk[fastapi]>=1.38.0
+
+# === Rate Limiting ===
+slowapi>=0.1.9
+ratelimit>=2.2.1
+
+# === Billing Integration ===
+stripe>=7.0.0
+
+# === Testing framework ===
 pytest>=7.4.0
 pytest-mock>=3.11.0
 pytest-cov>=4.1.0
 pytest-asyncio>=0.21.0
+pytest-xdist>=3.5.0
+pytest-postgresql>=5.0.0
 requests-mock>=1.11.0
 
-# Development tools
+# === Development tools ===
 python-dotenv>=1.0.0
 PyYAML>=6.0.1
+black>=23.0.0
+mypy>=1.7.0
+flake8>=6.1.0
 
-# Logging and monitoring
+# === Logging and monitoring ===
 colorlog>=6.7.0
+python-json-logger>=2.0.7
 psutil>=5.9.0
 
-# Optional: Rate limiting for API calls
-ratelimit>=2.2.1
-
-# CLI support
+# === CLI support ===
 argparse-dataclass>=2.0.0
+click>=8.1.0
