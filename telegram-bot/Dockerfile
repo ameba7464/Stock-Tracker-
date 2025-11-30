@@ -6,11 +6,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application and configuration files
+# Copy application
 COPY app/ ./app/
-COPY credentials.json ./
-COPY token.json ./
-COPY .env ./
 
 # Create logs directory
 RUN mkdir -p logs

@@ -1,7 +1,12 @@
 """Главная точка входа в приложение."""
 import asyncio
+import os
+from contextlib import asynccontextmanager
+
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 
 from app.config import settings
 from app.database.database import init_db, close_db
@@ -11,8 +16,14 @@ from app.bot.handlers import start, registration, menu, api_key
 from app.services.scheduler import auto_update_scheduler
 from app.utils.logger import logger
 
+# Webhook settings
+WEBHOOK_PATH = f"/webhook/{settings.bot_token}"
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST", "")
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}" if WEBHOOK_HOST else ""
+USE_WEBHOOK = bool(WEBHOOK_HOST)
 
-async def on_startup():
+
+async def on_startup(bot: Bot):
     """Действия при запуске бота."""
     logger.info("Bot is starting...")
     await init_db()
@@ -20,23 +31,31 @@ async def on_startup():
     # Запускаем планировщик автообновления таблиц
     auto_update_scheduler.start()
     
+    # Устанавливаем webhook если указан хост
+    if USE_WEBHOOK:
+        await bot.set_webhook(WEBHOOK_URL)
+        logger.info(f"Webhook set to {WEBHOOK_URL}")
+    
     logger.info("Bot started successfully!")
 
 
-async def on_shutdown():
+async def on_shutdown(bot: Bot):
     """Действия при остановке бота."""
     logger.info("Bot is shutting down...")
     
     # Останавливаем планировщик
     auto_update_scheduler.stop()
     
+    # Удаляем webhook
+    if USE_WEBHOOK:
+        await bot.delete_webhook()
+    
     await close_db()
     logger.info("Bot stopped successfully!")
 
 
-async def main():
-    """Главная функция запуска бота."""
-    # Инициализация бота и диспетчера
+async def main_polling():
+    """Запуск бота в режиме polling (для разработки)."""
     bot = Bot(token=settings.bot_token)
     storage = MemoryStorage()
     dp = Dispatcher(storage=storage)
@@ -52,7 +71,7 @@ async def main():
     dp.include_router(api_key.router)
     
     try:
-        await on_startup()
+        await on_startup(bot)
         logger.info("Starting polling...")
         await dp.start_polling(
             bot,
@@ -63,12 +82,65 @@ async def main():
     except Exception as e:
         logger.error(f"Error during bot execution: {e}", exc_info=True)
     finally:
-        await on_shutdown()
+        await on_shutdown(bot)
         await bot.session.close()
+
+
+def main_webhook():
+    """Запуск бота в режиме webhook (для production)."""
+    bot = Bot(token=settings.bot_token)
+    storage = MemoryStorage()
+    dp = Dispatcher(storage=storage)
+    
+    # Регистрация middleware
+    dp.update.middleware(DatabaseMiddleware())
+    dp.update.middleware(PaymentMiddleware())
+    
+    # Регистрация роутеров
+    dp.include_router(start.router)
+    dp.include_router(registration.router)
+    dp.include_router(menu.router)
+    dp.include_router(api_key.router)
+    
+    # Создаём aiohttp приложение
+    app = web.Application()
+    
+    # Health check endpoint
+    async def health_check(request):
+        return web.json_response({"status": "ok"})
+    
+    app.router.add_get("/health", health_check)
+    app.router.add_get("/", health_check)
+    
+    # Настраиваем webhook handler
+    webhook_requests_handler = SimpleRequestHandler(
+        dispatcher=dp,
+        bot=bot,
+    )
+    webhook_requests_handler.register(app, path=WEBHOOK_PATH)
+    
+    # Startup/shutdown hooks
+    async def on_startup_wrapper(app):
+        await on_startup(bot)
+    
+    async def on_shutdown_wrapper(app):
+        await on_shutdown(bot)
+        await bot.session.close()
+    
+    app.on_startup.append(on_startup_wrapper)
+    app.on_shutdown.append(on_shutdown_wrapper)
+    
+    # Запускаем сервер
+    port = int(os.getenv("PORT", "8080"))
+    logger.info(f"Starting webhook server on port {port}")
+    web.run_app(app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        if USE_WEBHOOK:
+            main_webhook()
+        else:
+            asyncio.run(main_polling())
     except KeyboardInterrupt:
         logger.info("Bot stopped")

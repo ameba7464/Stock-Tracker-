@@ -1,15 +1,9 @@
 """Интеграция с Wildberries API и Google Sheets."""
-import sys
-from pathlib import Path
 from typing import Optional
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Добавляем путь к основному проекту (корень "Stock Tracker")
-project_root = Path(__file__).parent.parent.parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-from wildberries_complete_data_collector import WildberriesDataCollector
+from app.services.wildberries_complete_data_collector import WildberriesDataCollector
 from app.services.google_sheets import google_sheets_service
 from app.database.crud import update_user_api_key
 from app.database.models import User
