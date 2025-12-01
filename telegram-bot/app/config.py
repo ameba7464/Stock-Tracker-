@@ -20,10 +20,11 @@ class Settings(BaseSettings):
     db_port: int = 5432
     db_name: str = "tgstock"
     db_user: str = "postgres"
-    db_password: str
+    db_password: str = ""
+    database_url_override: str = ""  # Allows passing full DATABASE_URL
     
     # Application
-    google_sheet_url: str
+    google_sheet_url: str = ""
     google_drive_folder_id: str = ""
     admin_ids: str = ""
     
@@ -38,9 +39,14 @@ class Settings(BaseSettings):
     @property
     def database_url(self) -> str:
         """Возвращает URL подключения к базе данных."""
+        # Если передан полный DATABASE_URL, используем его
+        if self.database_url_override:
+            return self.database_url_override
+            
         # PostgreSQL (production)
         if self.db_host != "localhost" or self.db_port != 5432:
-            return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}"
+            ssl_param = "?ssl=require" if "yandexcloud" in self.db_host or self.db_port == 6432 else ""
+            return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}{ssl_param}"
         
         # SQLite (development - будет использован позже)
         return f"sqlite+aiosqlite:///{self.db_name}"

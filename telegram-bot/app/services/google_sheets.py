@@ -134,21 +134,23 @@ class GoogleSheetsService:
         Returns:
             ID созданной таблицы или None
         """
-        if not self.oauth_client:
-            logger.error("OAuth client not initialized. Cannot create sheets.")
-            logger.error("Run get_oauth_token.py to authorize")
+        # Используем OAuth если есть, иначе Service Account
+        client_to_use = self.oauth_client or self.client
+        
+        if not client_to_use:
+            logger.error("No Google client available. Cannot create sheets.")
             return None
         
         try:
-            # Создаем таблицу через OAuth (от имени владельца)
+            # Создаем таблицу
             title = f'Stock Tracker - {user_name}'
             
             # Если указана папка, создаём в ней
             if settings.google_drive_folder_id:
                 logger.info(f"Creating sheet in folder: {settings.google_drive_folder_id}")
-                spreadsheet = self.oauth_client.create(title, folder_id=settings.google_drive_folder_id)
+                spreadsheet = client_to_use.create(title, folder_id=settings.google_drive_folder_id)
             else:
-                spreadsheet = self.oauth_client.create(title)
+                spreadsheet = client_to_use.create(title)
             
             sheet_id = spreadsheet.id
             logger.info(f"Created new sheet: {sheet_id}")
@@ -158,17 +160,18 @@ class GoogleSheetsService:
             worksheet.update_title("Stock Tracker")
             logger.info("Renamed sheet to 'Stock Tracker'")
             
-            # Даем доступ Service Account для обновлений
-            try:
-                spreadsheet.share(
-                    'stocktr@stocktr-479319.iam.gserviceaccount.com',
-                    perm_type='user',
-                    role='writer',
-                    notify=False
-                )
-                logger.info("Shared sheet with Service Account")
-            except Exception as e:
-                logger.warning(f"Could not share with Service Account: {e}")
+            # Если создали через OAuth, даем доступ Service Account для обновлений
+            if self.oauth_client and client_to_use == self.oauth_client:
+                try:
+                    spreadsheet.share(
+                        'stocktr@stocktr-479319.iam.gserviceaccount.com',
+                        perm_type='user',
+                        role='writer',
+                        notify=False
+                    )
+                    logger.info("Shared sheet with Service Account")
+                except Exception as e:
+                    logger.warning(f"Could not share with Service Account: {e}")
             
             # Даем доступ всем по ссылке
             spreadsheet.share('', perm_type='anyone', role='writer')
