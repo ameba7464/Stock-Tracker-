@@ -695,6 +695,16 @@ class GoogleSheetsService:
                         warehouse_stocks[wh_name] = wh.get("stock", 0)
                         warehouse_orders[wh_name] = wh.get("orders", 0)
                 
+                # Рассчитываем общую оборачиваемость в днях
+                # Формула: Остатки / (Заказы / Период) = Остатки * Период / Заказы
+                # Период по умолчанию 7 дней (стандартный период WB API)
+                total_stock = product.total_stock or 0
+                total_orders = product.total_orders or 0
+                if total_orders > 0 and total_stock > 0:
+                    total_turnover = round((total_stock * 7) / total_orders, 1)
+                else:
+                    total_turnover = 0
+                
                 # Базовые колонки
                 row = [
                     product.brand_name or "",  # Бренд
@@ -704,9 +714,9 @@ class GoogleSheetsService:
                     product.in_way_to_client or 0,  # В пути до покупателя
                     product.in_way_from_client or 0,  # В пути конв. на склад WB
                     # product.total_orders or 0,  # Убрана метрика "Всего заказов на складах WB"
-                    product.total_orders or 0,  # Заказы (всего)
-                    product.total_stock or 0,  # Остатки (всего)
-                    int(product.turnover) if product.turnover else 0  # Оборачиваемость (дни)
+                    total_orders,  # Заказы (всего)
+                    total_stock,  # Остатки (всего)
+                    total_turnover if total_turnover > 0 else '-'  # Рассчитанная оборачиваемость (дни)
                 ]
                 
                 # Данные по складам

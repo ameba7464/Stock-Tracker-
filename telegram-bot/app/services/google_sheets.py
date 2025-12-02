@@ -311,6 +311,14 @@ class GoogleSheetsService:
         rows = [header_row1, header_row2]
         
         for product in products:
+            # Рассчитываем общую оборачиваемость в днях
+            # Формула: Остатки / (Заказы / Период) = Остатки * Период / Заказы
+            # Период по умолчанию 7 дней (стандартный период WB API)
+            if product.orders_total > 0 and product.stocks_total > 0:
+                total_turnover = round((product.stocks_total * 7) / product.orders_total, 1)
+            else:
+                total_turnover = 0
+            
             row = [
                 product.brand,
                 product.subject,
@@ -321,7 +329,7 @@ class GoogleSheetsService:
                 # product.orders_wb_warehouses,  # Убрана метрика
                 product.orders_total,
                 product.stocks_total,
-                product.turnover_days
+                total_turnover if total_turnover > 0 else ''  # Рассчитанная оборачиваемость
             ]
             
             # Добавляем данные по складам
