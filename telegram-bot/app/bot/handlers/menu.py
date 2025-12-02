@@ -34,7 +34,7 @@ async def callback_get_sheet(callback: CallbackQuery, session: AsyncSession):
 @router.callback_query(F.data == "about")
 async def callback_about(callback: CallbackQuery):
     """Обработка нажатия на кнопку 'О сервисе'."""
-    await callback.message.answer(
+    await callback.message.edit_text(
         Messages.about(),
         parse_mode="HTML",
         reply_markup=get_back_keyboard()
@@ -45,7 +45,7 @@ async def callback_about(callback: CallbackQuery):
 @router.callback_query(F.data == "help")
 async def callback_help(callback: CallbackQuery):
     """Обработка нажатия на кнопку 'Помощь'."""
-    await callback.message.answer(
+    await callback.message.edit_text(
         Messages.help_message(),
         parse_mode="HTML",
         reply_markup=get_back_keyboard()
@@ -62,16 +62,14 @@ async def callback_settings(callback: CallbackQuery, session: AsyncSession):
     has_api_key = bool(user and user.wb_api_key)
     
     settings_text = (
-        "┌─────────────────────────────┐\n"
-        "│  ⚙️  <b>НАСТРОЙКИ</b>\n"
-        "└─────────────────────────────┘\n\n"
+        "⚙️ <b>Настройки</b>\n\n"
         f"<b>API ключ WB:</b> {'✅ Добавлен' if has_api_key else '❌ Не добавлен'}\n"
         f"<b>Email:</b> {user.email if user else 'Не указан'}\n"
         f"<b>Статус:</b> {'🟢 Активен' if user and user.payment_status == 'completed' else '🟡 Ожидание'}\n\n"
         "Выберите что хотите изменить:"
     )
     
-    await callback.message.answer(
+    await callback.message.edit_text(
         settings_text,
         parse_mode="HTML",
         reply_markup=get_settings_keyboard(has_api_key=has_api_key)
@@ -97,8 +95,9 @@ async def callback_back_to_menu(callback: CallbackQuery, session: AsyncSession):
     
     name = user.name if user else "друг"
     
+    # Используем компактное меню вместо полного приветствия
     await callback.message.edit_text(
-        Messages.welcome_returning_user(name, status),
+        Messages.main_menu(name, status),
         parse_mode="HTML",
         reply_markup=get_main_menu_keyboard(has_api_key=has_api_key, has_table=has_table)
     )
@@ -124,7 +123,7 @@ async def callback_refresh_data(callback: CallbackQuery, session: AsyncSession):
     
     # TODO: Вызвать обновление таблицы
     # Пока заглушка
-    await callback.message.answer(
+    await callback.message.edit_text(
         "🔄 <b>Обновление данных</b>\n\n"
         "Данные в таблице обновляются автоматически каждые 24 часа.\n"
         "Для ручного обновления функция будет добавлена в следующей версии.",
