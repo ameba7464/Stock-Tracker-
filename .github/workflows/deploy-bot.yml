@@ -72,7 +72,7 @@ jobs:
             sudo docker run -d \
               --name stock-tracker-bot \
               --restart unless-stopped \
-              --add-host rc1d-bjtjmtgsgmuiptqm.mdb.yandexcloud.net:10.0.0.18 \
+              --network host \
               -v /home/yc-user/credentials.json:/app/credentials.json:ro \
               -v /home/yc-user/token.json:/app/token.json:ro \
               -e BOT_TOKEN=${{ secrets.BOT_TOKEN }} \
