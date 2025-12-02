@@ -9,7 +9,6 @@ class UserStatus:
     """Статус пользователя для отображения."""
     has_api_key: bool = False
     has_table: bool = False
-    last_update: Optional[datetime] = None
 
 
 @dataclass 
@@ -45,16 +44,11 @@ class Messages:
         api_icon = "✅" if status.has_api_key else "❌"
         table_icon = "✅" if status.has_table else "⏳"
         
-        update_text = ""
-        if status.last_update:
-            update_text = f"\n🕐 <i>Обновлено: {status.last_update.strftime('%d.%m в %H:%M')}</i>"
-        
         return (
             f"🎯 <b>Stock Tracker</b>\n\n"
             f"👋 С возвращением, <b>{name}</b>!\n\n"
             f"{api_icon} API: {'Подключён' if status.has_api_key else 'Не подключён'}\n"
-            f"{table_icon} Таблица: {'Готова' if status.has_table else 'Не создана'}"
-            f"{update_text}\n\n"
+            f"{table_icon} Таблица: {'Готова' if status.has_table else 'Не создана'}\n\n"
             f"👇 Выберите действие:"
         )
     

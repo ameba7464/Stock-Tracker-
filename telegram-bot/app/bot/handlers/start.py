@@ -41,8 +41,7 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession):
         # Формируем статус пользователя
         status = UserStatus(
             has_api_key=has_api_key,
-            has_table=has_table,
-            last_update=user.updated_at
+            has_table=has_table
         )
         
         # Красивое приветствие

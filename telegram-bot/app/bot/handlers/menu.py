@@ -34,8 +34,7 @@ async def callback_back_to_menu(callback: CallbackQuery, session: AsyncSession):
     # Создаем статус пользователя
     status = UserStatus(
         has_api_key=has_api_key,
-        has_table=has_table,
-        last_update=user.updated_at if user else None
+        has_table=has_table
     )
     
     name = user.name if user else "друг"
