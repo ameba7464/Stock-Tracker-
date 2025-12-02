@@ -9,9 +9,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application
 COPY app/ ./app/
 
-# Copy Google credentials (Service Account + OAuth token)
-COPY credentials.json ./credentials.json
-COPY token.json ./token.json
+# Google credentials will be mounted as volume or created at runtime
+# DO NOT copy credentials.json and token.json - they are secrets
 
 # Create logs directory
 RUN mkdir -p logs
