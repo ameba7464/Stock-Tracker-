@@ -230,13 +230,32 @@ async def process_new_phone(message: Message, state: FSMContext, session: AsyncS
 
 
 # ═══════════════════════════════════════════════════
-# ОТМЕНА FSM ПРИ НАЖАТИИ КНОПОК
+# ОТМЕНА РЕДАКТИРОВАНИЯ
 # ═══════════════════════════════════════════════════
 
-@router.callback_query(ProfileEditStates.WAITING_FOR_NAME)
-@router.callback_query(ProfileEditStates.WAITING_FOR_EMAIL)
-@router.callback_query(ProfileEditStates.WAITING_FOR_PHONE)
-async def callback_cancel_edit(callback: CallbackQuery, state: FSMContext):
-    """Отмена редактирования при нажатии на любую кнопку."""
+@router.callback_query(F.data == "settings_profile", ProfileEditStates.WAITING_FOR_NAME)
+@router.callback_query(F.data == "settings_profile", ProfileEditStates.WAITING_FOR_EMAIL)
+@router.callback_query(F.data == "settings_profile", ProfileEditStates.WAITING_FOR_PHONE)
+async def callback_cancel_edit_profile(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Отмена редактирования и возврат в профиль."""
     await state.clear()
-    # Пропускаем обработку дальше, чтобы сработал правильный handler
+    
+    telegram_id = callback.from_user.id
+    user = await get_user_by_telegram_id(session, telegram_id)
+    
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+    
+    profile = UserProfile(
+        name=user.name,
+        email=user.email,
+        phone=user.phone
+    )
+    
+    await callback.message.edit_text(
+        Messages.settings_profile(profile),
+        parse_mode="HTML",
+        reply_markup=get_profile_keyboard()
+    )
+    await callback.answer()

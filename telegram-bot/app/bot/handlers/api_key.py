@@ -253,11 +253,23 @@ async def callback_generate_table(callback: CallbackQuery, session: AsyncSession
 
 
 # ═══════════════════════════════════════════════════
-# ОТМЕНА FSM ПРИ НАЖАТИИ КНОПОК
+# ОТМЕНА ВВОДА API КЛЮЧА
 # ═══════════════════════════════════════════════════
 
-@router.callback_query(ApiKeyStates.WAITING_FOR_API_KEY)
-async def callback_cancel_api_input(callback: CallbackQuery, state: FSMContext):
-    """Отмена ввода API ключа при нажатии на любую кнопку."""
+@router.callback_query(F.data == "settings_api", ApiKeyStates.WAITING_FOR_API_KEY)
+async def callback_cancel_api_input(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    """Отмена ввода API ключа и возврат в меню API."""
     await state.clear()
-    # Пропускаем обработку дальше
+    
+    telegram_id = callback.from_user.id
+    user = await get_user_by_telegram_id(session, telegram_id)
+    
+    has_api_key = bool(user and user.wb_api_key)
+    added_date = user.updated_at if user and user.wb_api_key else None
+    
+    await callback.message.edit_text(
+        Messages.settings_api(has_api_key, added_date),
+        parse_mode="HTML",
+        reply_markup=get_api_menu_keyboard(has_api_key=has_api_key)
+    )
+    await callback.answer()
