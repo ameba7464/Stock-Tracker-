@@ -329,9 +329,11 @@ class GoogleSheetsService:
                 stocks = product.stocks_by_warehouse.get(warehouse, 0)
                 orders = product.orders_by_warehouse.get(warehouse, 0)
                 
-                # Рассчитываем оборачиваемость
+                # Рассчитываем оборачиваемость в днях
+                # Формула: Остатки / (Заказы / Период) = Остатки * Период / Заказы
+                # Период по умолчанию 7 дней (стандартный период WB API)
                 if orders > 0 and stocks > 0:
-                    turnover = round(stocks / orders, 1)
+                    turnover = round((stocks * 7) / orders, 1)
                 else:
                     turnover = 0
                 

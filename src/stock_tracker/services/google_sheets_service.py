@@ -32,7 +32,7 @@ class GoogleSheetsService:
     
     # Константы структуры таблицы
     NUM_BASE_INFO_COLS = 4  # Бренд, Предмет, Артикул продавца, Артикул товара (nmid)
-    NUM_GENERAL_METRICS_COLS = 6  # В пути до покупателя, В пути конв., Всего заказов, Заказы, Остатки, Оборачиваемость
+    NUM_GENERAL_METRICS_COLS = 5  # В пути до покупателя, В пути конв., Заказы, Остатки, Оборачиваемость (убрана "Всего заказов на складах WB")
     NUM_WAREHOUSE_COLS = 3  # Остатки, Заказы, Оборач. (для каждого склада)
     
     # Названия заголовков группы 1
@@ -50,7 +50,7 @@ class GoogleSheetsService:
     HEADER_ROW2_GENERAL = [
         "В пути до покупателя",
         "В пути конв. на склад WB",
-        "Всего заказов на складах WB",
+        # "Всего заказов на складах WB",  # Убрана метрика
         "Заказы (всего)",
         "Остатки (всего)",
         "Оборачиваемость (дни)"
@@ -703,7 +703,7 @@ class GoogleSheetsService:
                     product.wildberries_article or product.nm_id or "",  # Артикул товара (nmid)
                     product.in_way_to_client or 0,  # В пути до покупателя
                     product.in_way_from_client or 0,  # В пути конв. на склад WB
-                    product.total_orders or 0,  # Всего заказов на складах WB
+                    # product.total_orders or 0,  # Убрана метрика "Всего заказов на складах WB"
                     product.total_orders or 0,  # Заказы (всего)
                     product.total_stock or 0,  # Остатки (всего)
                     int(product.turnover) if product.turnover else 0  # Оборачиваемость (дни)
@@ -714,9 +714,11 @@ class GoogleSheetsService:
                     stocks = warehouse_stocks.get(wh_name, 0)
                     orders = warehouse_orders.get(wh_name, 0)
                     
-                    # Оборачиваемость склада
+                    # Оборачиваемость склада в днях
+                    # Формула: Остатки / (Заказы / Период) = Остатки * Период / Заказы
+                    # Период по умолчанию 7 дней (стандартный период WB API)
                     if orders > 0 and stocks > 0:
-                        turnover = round(stocks / orders, 1)
+                        turnover = round((stocks * 7) / orders, 1)
                     else:
                         turnover = 0
                     
