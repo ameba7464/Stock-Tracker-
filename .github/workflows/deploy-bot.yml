@@ -74,7 +74,7 @@ jobs:
               --restart unless-stopped \
               --network host \
               -v /home/yc-user/credentials.json:/app/credentials.json:ro \
-              -v /home/yc-user/token.json:/app/token.json:ro \
+              -v /home/yc-user/token.json:/app/token.json:rw \
               -e BOT_TOKEN=${{ secrets.BOT_TOKEN }} \
               -e "DATABASE_URL=${{ secrets.DATABASE_URL }}" \
               -e GOOGLE_DRIVE_FOLDER_ID=${{ secrets.GOOGLE_DRIVE_FOLDER_ID }} \
