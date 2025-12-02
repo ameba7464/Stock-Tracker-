@@ -7,10 +7,13 @@ from app.database.models import Base
 from app.utils.logger import logger
 
 
+# Получаем URL базы данных
+db_url = settings.get_database_url()
+logger.info(f"Database URL type: {'PostgreSQL' if 'postgresql' in db_url else 'SQLite'}")
+
 # Создаем асинхронный движок
-# Для SQLite не используем pool_size и max_overflow
 engine = create_async_engine(
-    settings.database_url,
+    db_url,
     echo=False,  # Установить True для отладки SQL запросов
 )
 

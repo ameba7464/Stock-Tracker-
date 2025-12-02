@@ -1,4 +1,5 @@
 """Конфигурация приложения."""
+import os
 from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -21,7 +22,7 @@ class Settings(BaseSettings):
     db_name: str = "tgstock"
     db_user: str = "postgres"
     db_password: str = ""
-    database_url_override: str = ""  # Allows passing full DATABASE_URL
+    database_url: str = ""  # Позволяет передать полный DATABASE_URL напрямую
     
     # Application
     google_sheet_url: str = ""
@@ -36,19 +37,22 @@ class Settings(BaseSettings):
     payment_provider: str = "yookassa"
     payment_token: str = ""
     
-    @property
-    def database_url(self) -> str:
+    def get_database_url(self) -> str:
         """Возвращает URL подключения к базе данных."""
-        # Если передан полный DATABASE_URL, используем его
-        if self.database_url_override:
-            return self.database_url_override
+        # Если передан полный DATABASE_URL через переменную окружения, используем его
+        if self.database_url:
+            # Заменяем postgresql:// на postgresql+asyncpg:// если нужно
+            url = self.database_url
+            if url.startswith("postgresql://") and "+asyncpg" not in url:
+                url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            return url
             
-        # PostgreSQL (production)
+        # PostgreSQL (production) - если указаны параметры подключения
         if self.db_host != "localhost" or self.db_port != 5432:
             ssl_param = "?ssl=require" if "yandexcloud" in self.db_host or self.db_port == 6432 else ""
             return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}{ssl_param}"
         
-        # SQLite (development - будет использован позже)
+        # SQLite (development)
         return f"sqlite+aiosqlite:///{self.db_name}"
     
     @property

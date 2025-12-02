@@ -26,6 +26,16 @@ USE_WEBHOOK = bool(WEBHOOK_HOST)
 async def on_startup(bot: Bot):
     """Действия при запуске бота."""
     logger.info("Bot is starting...")
+    
+    # Логируем информацию о подключении к БД
+    db_url = settings.get_database_url()
+    db_type = "PostgreSQL" if "postgresql" in db_url else "SQLite"
+    logger.info(f"Database type: {db_type}")
+    if "postgresql" in db_url:
+        # Скрываем пароль в логах
+        safe_url = db_url.split("@")[-1] if "@" in db_url else db_url
+        logger.info(f"Database host: {safe_url}")
+    
     await init_db()
     
     # Запускаем планировщик автообновления таблиц
