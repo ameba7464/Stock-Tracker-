@@ -285,7 +285,7 @@ class GoogleSheetsService:
         
         # Строка 1: Группы колонок
         header_row1 = ['', '', '', '']  # Основная информация
-        header_row1.extend([''] * 6)     # Общие метрики
+        header_row1.extend([''] * 5)     # Общие метрики (без "Всего заказов на складах WB")
         
         for warehouse in all_warehouses:
             header_row1.extend([warehouse, '', ''])
@@ -298,7 +298,7 @@ class GoogleSheetsService:
             'Артикул товара (nmid)',
             'В пути до покупателя',
             'В пути конв. на склад WB',
-            'Всего заказов на складах WB',
+            # 'Всего заказов на складах WB',  # Убрана метрика
             'Заказы (всего)',
             'Остатки (всего)',
             'Оборачиваемость (дни)'
@@ -318,7 +318,7 @@ class GoogleSheetsService:
                 product.nm_id,
                 product.in_transit_to_customer,
                 product.in_transit_to_wb_warehouse,
-                product.orders_wb_warehouses,
+                # product.orders_wb_warehouses,  # Убрана метрика
                 product.orders_total,
                 product.stocks_total,
                 product.turnover_days
@@ -353,10 +353,10 @@ class GoogleSheetsService:
             # Получаем данные для определения количества строк и колонок
             all_data = worksheet.get_all_values()
             data_rows_count = len(all_data) - 2 if len(all_data) > 2 else 0
-            total_cols = len(all_data[0]) if all_data else 10
+            total_cols = len(all_data[0]) if all_data else 9
             
-            # Определяем количество складов
-            num_warehouses = (total_cols - 10) // 3 if total_cols > 10 else 0
+            # Определяем количество складов (9 базовых колонок: 4 основных + 5 метрик)
+            num_warehouses = (total_cols - 9) // 3 if total_cols > 9 else 0
             
             # 1. Объединяем ячейки заголовков групп
             await self._merge_group_headers(spreadsheet, worksheet, num_warehouses)
@@ -436,7 +436,7 @@ class GoogleSheetsService:
                 }
             })
             
-            # Общие метрики (E1:J1)
+            # Общие метрики (E1:I1) - 5 колонок после удаления "Всего заказов на складах WB"
             merge_requests.append({
                 'mergeCells': {
                     'range': {
@@ -444,15 +444,15 @@ class GoogleSheetsService:
                         'startRowIndex': 0,
                         'endRowIndex': 1,
                         'startColumnIndex': 4,
-                        'endColumnIndex': 10
+                        'endColumnIndex': 9
                     },
                     'mergeType': 'MERGE_ALL'
                 }
             })
             
-            # Склады (каждый склад = 3 колонки)
+            # Склады (каждый склад = 3 колонки, начиная с колонки J = индекс 9)
             for i in range(num_warehouses):
-                start_col = 10 + (i * 3)
+                start_col = 9 + (i * 3)
                 end_col = start_col + 3
                 
                 merge_requests.append({
@@ -511,14 +511,14 @@ class GoogleSheetsService:
                     }
                 })
             
-            # Общие метрики (E-J) - 120px
+            # Общие метрики (E-I) - 120px (5 колонок после удаления "Всего заказов на складах WB")
             requests.append({
                 'updateDimensionProperties': {
                     'range': {
                         'sheetId': worksheet.id,
                         'dimension': 'COLUMNS',
                         'startIndex': 4,
-                        'endIndex': 10
+                        'endIndex': 9
                     },
                     'properties': {'pixelSize': 120},
                     'fields': 'pixelSize'
@@ -526,13 +526,13 @@ class GoogleSheetsService:
             })
             
             # Колонки складов - 90px
-            if total_cols > 10:
+            if total_cols > 9:
                 requests.append({
                     'updateDimensionProperties': {
                         'range': {
                             'sheetId': worksheet.id,
                             'dimension': 'COLUMNS',
-                            'startIndex': 10,
+                            'startIndex': 9,
                             'endIndex': total_cols
                         },
                         'properties': {'pixelSize': 90},
@@ -647,15 +647,15 @@ class GoogleSheetsService:
                 }
             })
             
-            # После "Общих метрик" (колонка J)
+            # После "Общих метрик" (колонка I)
             border_requests.append({
                 'updateBorders': {
                     'range': {
                         'sheetId': worksheet.id,
                         'startRowIndex': 0,
                         'endRowIndex': data_rows_count + 2,
-                        'startColumnIndex': 9,
-                        'endColumnIndex': 10
+                        'startColumnIndex': 8,
+                        'endColumnIndex': 9
                     },
                     'right': {
                         'style': 'SOLID_THICK',
@@ -667,7 +667,7 @@ class GoogleSheetsService:
             
             # Между складами
             for i in range(num_warehouses - 1):
-                col_index = 10 + (i * 3) + 2
+                col_index = 9 + (i * 3) + 2
                 border_requests.append({
                     'updateBorders': {
                         'range': {
