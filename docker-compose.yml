@@ -250,6 +250,52 @@ services:
     profiles:
       - bot
 
+  # PostgreSQL Backup Service
+  # Режимы:
+  #   - По умолчанию (cron): запуск каждую ночь в 03:00
+  #   - Ручной: docker-compose run --rm -e BACKUP_MODE=backup backup
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    container_name: stock-tracker-backup
+    environment:
+      # Режим работы: cron (по расписанию) или backup (однократно)
+      BACKUP_MODE: ${BACKUP_MODE:-cron}
+      
+      # PostgreSQL
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-stock_tracker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-stock_tracker_password}
+      POSTGRES_DB: ${POSTGRES_DB:-stock_tracker}
+      
+      # Yandex Object Storage (S3)
+      S3_ENDPOINT: https://storage.yandexcloud.net
+      S3_BUCKET: ${S3_BACKUP_BUCKET:-stock-tracker-backups}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_REGION: ru-central1
+      
+      # Backup settings
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      LOG_FILE: /var/log/backup_postgres.log
+      
+      # Telegram notifications (optional)
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_BACKUP_CHAT_ID:-}
+    volumes:
+      - ./logs:/var/log
+      - backup_data:/tmp/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - stock-tracker-network
+    restart: unless-stopped
+    profiles:
+      - backup
+
 volumes:
   postgres_data:
     driver: local
@@ -258,6 +304,8 @@ volumes:
   prometheus_data:
     driver: local
   grafana_data:
+    driver: local
+  backup_data:
     driver: local
 
 networks:

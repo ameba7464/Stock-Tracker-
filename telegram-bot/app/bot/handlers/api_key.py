@@ -5,27 +5,35 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bot.states import ApiKeyStates, GoogleSheetStates
-from app.bot.keyboards.inline import get_main_menu_keyboard, get_back_keyboard
+from app.bot.keyboards.inline import (
+    get_main_menu_keyboard, 
+    get_back_keyboard,
+    get_api_menu_keyboard,
+    get_api_delete_confirm_keyboard,
+    get_cancel_keyboard,
+)
 from app.bot.utils.messages import Messages
-from app.database.crud import get_user_by_telegram_id, update_user_api_key
+from app.database.crud import get_user_by_telegram_id, update_user_api_key, delete_user_api_key
 from app.services.wb_integration import wb_integration
 from app.utils.logger import logger
 
 router = Router()
 
 
-@router.callback_query(F.data.in_(["add_api_key", "update_api_key"]))
+# ═══════════════════════════════════════════════════
+# ДОБАВЛЕНИЕ / ОБНОВЛЕНИЕ API КЛЮЧА
+# ═══════════════════════════════════════════════════
+
+@router.callback_query(F.data.in_(["add_api_key", "update_api_key", "api_update"]))
 async def callback_add_api_key(callback: CallbackQuery, state: FSMContext):
     """Обработка кнопки 'Добавить API ключ' или 'Обновить API ключ'."""
     await state.set_state(ApiKeyStates.WAITING_FOR_API_KEY)
     
-    is_update = callback.data == "update_api_key"
-    
-    await callback.message.answer(
+    await callback.message.edit_text(
         Messages.api_key_instructions(),
         parse_mode="HTML",
         disable_web_page_preview=True,
-        reply_markup=get_back_keyboard()
+        reply_markup=get_cancel_keyboard("settings_api")
     )
     await callback.answer()
 
@@ -97,6 +105,96 @@ async def process_api_key(message: Message, state: FSMContext, session: AsyncSes
         await state.clear()
 
 
+# ═══════════════════════════════════════════════════
+# ПРОВЕРКА СТАТУСА API КЛЮЧА
+# ═══════════════════════════════════════════════════
+
+@router.callback_query(F.data == "api_check_status")
+async def callback_api_check_status(callback: CallbackQuery, session: AsyncSession):
+    """Проверка статуса API ключа."""
+    telegram_id = callback.from_user.id
+    user = await get_user_by_telegram_id(session, telegram_id)
+    
+    if not user or not user.wb_api_key:
+        await callback.answer("❌ API ключ не добавлен", show_alert=True)
+        return
+    
+    await callback.answer()
+    
+    # Показываем что проверяем
+    await callback.message.edit_text(
+        Messages.api_check_status_checking(),
+        parse_mode="HTML"
+    )
+    
+    try:
+        # Проверяем ключ
+        is_valid = await wb_integration.validate_api_key(user.wb_api_key)
+        
+        if is_valid:
+            status_text = Messages.api_check_status_active()
+        else:
+            status_text = Messages.api_check_status_invalid()
+        
+        await callback.message.edit_text(
+            status_text,
+            parse_mode="HTML",
+            reply_markup=get_back_keyboard("settings_api")
+        )
+        
+        logger.info(f"API key status check for user {telegram_id}: {'valid' if is_valid else 'invalid'}")
+        
+    except Exception as e:
+        logger.error(f"Error checking API key status for user {telegram_id}: {e}", exc_info=True)
+        await callback.message.edit_text(
+            "❌ Ошибка при проверке ключа. Попробуйте позже.",
+            parse_mode="HTML",
+            reply_markup=get_back_keyboard("settings_api")
+        )
+
+
+# ═══════════════════════════════════════════════════
+# УДАЛЕНИЕ API КЛЮЧА
+# ═══════════════════════════════════════════════════
+
+@router.callback_query(F.data == "api_delete")
+async def callback_api_delete(callback: CallbackQuery):
+    """Запрос подтверждения удаления API ключа."""
+    await callback.message.edit_text(
+        Messages.api_delete_confirm(),
+        parse_mode="HTML",
+        reply_markup=get_api_delete_confirm_keyboard()
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "api_delete_confirm")
+async def callback_api_delete_confirm(callback: CallbackQuery, session: AsyncSession):
+    """Подтверждение удаления API ключа."""
+    telegram_id = callback.from_user.id
+    user = await get_user_by_telegram_id(session, telegram_id)
+    
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+    
+    # Удаляем ключ
+    await delete_user_api_key(session, user)
+    
+    await callback.message.edit_text(
+        Messages.api_deleted(),
+        parse_mode="HTML",
+        reply_markup=get_api_menu_keyboard(has_api_key=False)
+    )
+    await callback.answer("✅ Ключ удалён")
+    
+    logger.info(f"API key deleted for user {telegram_id}")
+
+
+# ═══════════════════════════════════════════════════
+# ГЕНЕРАЦИЯ ТАБЛИЦЫ
+# ═══════════════════════════════════════════════════
+
 @router.callback_query(F.data == "generate_table")
 async def callback_generate_table(callback: CallbackQuery, session: AsyncSession):
     """Обработка кнопки 'Получить мою таблицу'."""
@@ -152,3 +250,14 @@ async def callback_generate_table(callback: CallbackQuery, session: AsyncSession
             )
         except Exception as msg_error:
             logger.error(f"Failed to send error message: {msg_error}")
+
+
+# ═══════════════════════════════════════════════════
+# ОТМЕНА FSM ПРИ НАЖАТИИ КНОПОК
+# ═══════════════════════════════════════════════════
+
+@router.callback_query(ApiKeyStates.WAITING_FOR_API_KEY)
+async def callback_cancel_api_input(callback: CallbackQuery, state: FSMContext):
+    """Отмена ввода API ключа при нажатии на любую кнопку."""
+    await state.clear()
+    # Пропускаем обработку дальше

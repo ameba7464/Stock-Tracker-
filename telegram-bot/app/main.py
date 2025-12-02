@@ -12,7 +12,7 @@ from app.config import settings
 from app.database.database import init_db, close_db
 from app.bot.middlewares.db import DatabaseMiddleware
 from app.bot.middlewares.payment import PaymentMiddleware
-from app.bot.handlers import start, registration, menu, api_key
+from app.bot.handlers import start, registration, menu, api_key, profile
 from app.services.scheduler import auto_update_scheduler
 from app.utils.logger import logger
 
@@ -77,6 +77,7 @@ async def main_polling():
     # Регистрация роутеров
     dp.include_router(start.router)
     dp.include_router(registration.router)
+    dp.include_router(profile.router)
     dp.include_router(menu.router)
     dp.include_router(api_key.router)
     
@@ -109,6 +110,7 @@ def main_webhook():
     # Регистрация роутеров
     dp.include_router(start.router)
     dp.include_router(registration.router)
+    dp.include_router(profile.router)
     dp.include_router(menu.router)
     dp.include_router(api_key.router)
     

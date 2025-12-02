@@ -1,32 +1,50 @@
-"""Обработчики главного меню."""
+"""Обработчики главного меню и настроек."""
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.crud import get_user_by_telegram_id
-from app.bot.keyboards.inline import get_main_menu_keyboard, get_back_keyboard, get_settings_keyboard
-from app.bot.utils.messages import Messages, UserStatus
+from app.bot.keyboards.inline import (
+    get_main_menu_keyboard, 
+    get_back_keyboard, 
+    get_settings_keyboard,
+    get_profile_keyboard,
+    get_api_menu_keyboard,
+)
+from app.bot.utils.messages import Messages, UserStatus, UserProfile
 from app.config import settings
 from app.utils.logger import logger
 
 router = Router()
 
 
-@router.callback_query(F.data == "get_sheet")
-async def callback_get_sheet(callback: CallbackQuery, session: AsyncSession):
-    """Обработка нажатия на кнопку 'Получить таблицу снова'."""
+# ═══════════════════════════════════════════════════
+# ГЛАВНОЕ МЕНЮ
+# ═══════════════════════════════════════════════════
+
+@router.callback_query(F.data == "back_to_menu")
+async def callback_back_to_menu(callback: CallbackQuery, session: AsyncSession):
+    """Возврат в главное меню."""
     telegram_id = callback.from_user.id
     user = await get_user_by_telegram_id(session, telegram_id)
     
-    if not user or user.payment_status != 'completed':
-        await callback.answer("❌ Вы еще не зарегистрированы!", show_alert=True)
-        return
+    has_api_key = bool(user and user.wb_api_key)
+    has_table = bool(user and user.google_sheet_id)
     
-    await callback.message.answer(
-        "📊 <b>Ваша таблица с материалами:</b>\n\n"
-        f"{settings.google_sheet_url}\n\n"
-        "Изучайте материалы и развивайте свой бизнес! 🚀",
-        parse_mode="HTML"
+    # Создаем статус пользователя
+    status = UserStatus(
+        has_api_key=has_api_key,
+        has_table=has_table,
+        last_update=user.updated_at if user else None
+    )
+    
+    name = user.name if user else "друг"
+    
+    # Используем компактное меню
+    await callback.message.edit_text(
+        Messages.main_menu(name, status),
+        parse_mode="HTML",
+        reply_markup=get_main_menu_keyboard(has_api_key=has_api_key, has_table=has_table)
     )
     await callback.answer()
 
@@ -53,60 +71,107 @@ async def callback_help(callback: CallbackQuery):
     await callback.answer()
 
 
+# ═══════════════════════════════════════════════════
+# НАСТРОЙКИ (2 уровень)
+# ═══════════════════════════════════════════════════
+
 @router.callback_query(F.data == "settings")
-async def callback_settings(callback: CallbackQuery, session: AsyncSession):
-    """Обработка нажатия на кнопку 'Настройки'."""
-    telegram_id = callback.from_user.id
-    user = await get_user_by_telegram_id(session, telegram_id)
-    
-    has_api_key = bool(user and user.wb_api_key)
-    
-    settings_text = (
-        "⚙️ <b>Настройки</b>\n\n"
-        f"<b>API ключ WB:</b> {'✅ Добавлен' if has_api_key else '❌ Не добавлен'}\n"
-        f"<b>Email:</b> {user.email if user else 'Не указан'}\n"
-        f"<b>Статус:</b> {'🟢 Активен' if user and user.payment_status == 'completed' else '🟡 Ожидание'}\n\n"
-        "Выберите что хотите изменить:"
-    )
-    
+async def callback_settings(callback: CallbackQuery):
+    """Меню настроек."""
     await callback.message.edit_text(
-        settings_text,
+        Messages.settings_menu(),
         parse_mode="HTML",
-        reply_markup=get_settings_keyboard(has_api_key=has_api_key)
+        reply_markup=get_settings_keyboard()
     )
     await callback.answer()
 
 
-@router.callback_query(F.data == "back_to_menu")
-async def callback_back_to_menu(callback: CallbackQuery, session: AsyncSession):
-    """Возврат в главное меню."""
+@router.callback_query(F.data == "back_to_settings")
+async def callback_back_to_settings(callback: CallbackQuery):
+    """Возврат в меню настроек."""
+    await callback.message.edit_text(
+        Messages.settings_menu(),
+        parse_mode="HTML",
+        reply_markup=get_settings_keyboard()
+    )
+    await callback.answer()
+
+
+# ═══════════════════════════════════════════════════
+# ПРОФИЛЬ (3 уровень)
+# ═══════════════════════════════════════════════════
+
+@router.callback_query(F.data == "settings_profile")
+async def callback_settings_profile(callback: CallbackQuery, session: AsyncSession):
+    """Меню профиля пользователя."""
+    telegram_id = callback.from_user.id
+    user = await get_user_by_telegram_id(session, telegram_id)
+    
+    if not user:
+        await callback.answer("❌ Пользователь не найден", show_alert=True)
+        return
+    
+    profile = UserProfile(
+        name=user.name,
+        email=user.email,
+        phone=user.phone
+    )
+    
+    await callback.message.edit_text(
+        Messages.settings_profile(profile),
+        parse_mode="HTML",
+        reply_markup=get_profile_keyboard()
+    )
+    await callback.answer()
+
+
+# ═══════════════════════════════════════════════════
+# API КЛЮЧ (3 уровень)
+# ═══════════════════════════════════════════════════
+
+@router.callback_query(F.data == "settings_api")
+async def callback_settings_api(callback: CallbackQuery, session: AsyncSession):
+    """Меню управления API ключом."""
     telegram_id = callback.from_user.id
     user = await get_user_by_telegram_id(session, telegram_id)
     
     has_api_key = bool(user and user.wb_api_key)
-    has_table = bool(user and user.google_sheet_id)
+    added_date = user.updated_at if user and user.wb_api_key else None
     
-    # Создаем статус пользователя
-    status = UserStatus(
-        has_api_key=has_api_key,
-        has_table=has_table,
-        last_update=user.updated_at if user else None
-    )
-    
-    name = user.name if user else "друг"
-    
-    # Используем компактное меню вместо полного приветствия
     await callback.message.edit_text(
-        Messages.main_menu(name, status),
+        Messages.settings_api(has_api_key, added_date),
         parse_mode="HTML",
-        reply_markup=get_main_menu_keyboard(has_api_key=has_api_key, has_table=has_table)
+        reply_markup=get_api_menu_keyboard(has_api_key=has_api_key)
+    )
+    await callback.answer()
+
+
+# ═══════════════════════════════════════════════════
+# УСТАРЕВШИЕ (для обратной совместимости)
+# ═══════════════════════════════════════════════════
+
+@router.callback_query(F.data == "get_sheet")
+async def callback_get_sheet(callback: CallbackQuery, session: AsyncSession):
+    """Обработка нажатия на кнопку 'Получить таблицу снова'."""
+    telegram_id = callback.from_user.id
+    user = await get_user_by_telegram_id(session, telegram_id)
+    
+    if not user or user.payment_status != 'completed':
+        await callback.answer("❌ Вы еще не зарегистрированы!", show_alert=True)
+        return
+    
+    await callback.message.answer(
+        "📊 <b>Ваша таблица с материалами:</b>\n\n"
+        f"{settings.google_sheet_url}\n\n"
+        "Изучайте материалы и развивайте свой бизнес! 🚀",
+        parse_mode="HTML"
     )
     await callback.answer()
 
 
 @router.callback_query(F.data == "refresh_data")
 async def callback_refresh_data(callback: CallbackQuery, session: AsyncSession):
-    """Обновление данных в таблице."""
+    """Обновление данных в таблице (устаревшее)."""
     telegram_id = callback.from_user.id
     user = await get_user_by_telegram_id(session, telegram_id)
     
@@ -118,11 +183,8 @@ async def callback_refresh_data(callback: CallbackQuery, session: AsyncSession):
         await callback.answer("❌ Сначала создайте таблицу!", show_alert=True)
         return
     
-    # Показываем что обновляем
     await callback.answer("🔄 Обновляю данные...")
     
-    # TODO: Вызвать обновление таблицы
-    # Пока заглушка
     await callback.message.edit_text(
         "🔄 <b>Обновление данных</b>\n\n"
         "Данные в таблице обновляются автоматически каждые 24 часа.\n"

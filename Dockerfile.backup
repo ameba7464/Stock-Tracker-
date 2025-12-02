@@ -1,0 +1,24 @@
+FROM postgres:15-alpine
+
+# Установка зависимостей
+RUN apk add --no-cache \
+    bash \
+    curl \
+    gzip \
+    aws-cli \
+    tzdata
+
+# Установка временной зоны
+ENV TZ=Europe/Moscow
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+# Создание директорий
+RUN mkdir -p /app/scripts /var/log /tmp/backups
+
+# Копирование скриптов
+COPY scripts/backup_postgres.sh /app/scripts/
+COPY scripts/entrypoint_backup.sh /app/scripts/
+RUN chmod +x /app/scripts/*.sh
+
+# Точка входа для cron-режима или однократного запуска
+ENTRYPOINT ["/app/scripts/entrypoint_backup.sh"]

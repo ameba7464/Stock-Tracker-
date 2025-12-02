@@ -1,4 +1,4 @@
-"""FSM States для воронки регистрации."""
+"""FSM States для воронки регистрации и настроек."""
 from aiogram.fsm.state import State, StatesGroup
 
 
@@ -23,3 +23,11 @@ class GoogleSheetStates(StatesGroup):
     """Состояния для настройки Google Sheets."""
     
     WAITING_FOR_SHEET_ID = State()  # Ожидание ввода ID Google Таблицы
+
+
+class ProfileEditStates(StatesGroup):
+    """Состояния редактирования профиля пользователя."""
+    
+    WAITING_FOR_NAME = State()   # Ожидание нового имени
+    WAITING_FOR_EMAIL = State()  # Ожидание нового email
+    WAITING_FOR_PHONE = State()  # Ожидание нового телефона

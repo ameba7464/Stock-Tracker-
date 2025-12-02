@@ -132,3 +132,97 @@ async def update_user_api_key(
     
     logger.info(f"User API key updated: telegram_id={user.telegram_id}")
     return user
+
+
+async def update_user_name(
+    session: AsyncSession,
+    user: User,
+    name: str
+) -> User:
+    """
+    Обновить имя пользователя.
+    
+    Args:
+        session: Сессия БД
+        user: Пользователь
+        name: Новое имя
+        
+    Returns:
+        Обновленный пользователь
+    """
+    user.name = name
+    await session.commit()
+    await session.refresh(user)
+    
+    logger.info(f"User name updated: telegram_id={user.telegram_id}, name={name}")
+    return user
+
+
+async def update_user_email(
+    session: AsyncSession,
+    user: User,
+    email: str
+) -> User:
+    """
+    Обновить email пользователя.
+    
+    Args:
+        session: Сессия БД
+        user: Пользователь
+        email: Новый email
+        
+    Returns:
+        Обновленный пользователь
+    """
+    user.email = email
+    await session.commit()
+    await session.refresh(user)
+    
+    logger.info(f"User email updated: telegram_id={user.telegram_id}, email={email}")
+    return user
+
+
+async def update_user_phone(
+    session: AsyncSession,
+    user: User,
+    phone: str
+) -> User:
+    """
+    Обновить телефон пользователя.
+    
+    Args:
+        session: Сессия БД
+        user: Пользователь
+        phone: Новый телефон
+        
+    Returns:
+        Обновленный пользователь
+    """
+    user.phone = phone
+    await session.commit()
+    await session.refresh(user)
+    
+    logger.info(f"User phone updated: telegram_id={user.telegram_id}, phone={phone}")
+    return user
+
+
+async def delete_user_api_key(
+    session: AsyncSession,
+    user: User
+) -> User:
+    """
+    Удалить API ключ пользователя.
+    
+    Args:
+        session: Сессия БД
+        user: Пользователь
+        
+    Returns:
+        Обновленный пользователь
+    """
+    user.wb_api_key = None
+    await session.commit()
+    await session.refresh(user)
+    
+    logger.info(f"User API key deleted: telegram_id={user.telegram_id}")
+    return user
