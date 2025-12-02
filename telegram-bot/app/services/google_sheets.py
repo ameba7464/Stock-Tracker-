@@ -21,9 +21,16 @@ except ImportError:
 class GoogleSheetsService:
     """Сервис для работы с Google Sheets API."""
     
-    SCOPES = [
+    # Scopes для Service Account (полный доступ к Drive)
+    SA_SCOPES = [
         'https://www.googleapis.com/auth/spreadsheets',
         'https://www.googleapis.com/auth/drive'
+    ]
+    
+    # Scopes для OAuth (ограниченный доступ - только созданные файлы)
+    OAUTH_SCOPES = [
+        'https://www.googleapis.com/auth/spreadsheets',
+        'https://www.googleapis.com/auth/drive.file'
     ]
     
     def __init__(self):
@@ -49,7 +56,7 @@ class GoogleSheetsService:
             # Создаем Service Account credentials
             sa_credentials = ServiceAccountCredentials.from_service_account_file(
                 credentials_path,
-                scopes=self.SCOPES
+                scopes=self.SA_SCOPES
             )
             
             # Создаем клиент gspread для Service Account
@@ -72,10 +79,10 @@ class GoogleSheetsService:
                 logger.warning("OAuth token not found. Run get_oauth_token.py to authorize")
                 return
             
-            # Загружаем OAuth credentials
+            # Загружаем OAuth credentials (используем OAUTH_SCOPES)
             oauth_creds = OAuthCredentials.from_authorized_user_file(
                 str(token_path),
-                scopes=self.SCOPES
+                scopes=self.OAUTH_SCOPES
             )
             
             # Обновляем токен если истёк
@@ -86,6 +93,7 @@ class GoogleSheetsService:
                 # Сохраняем обновлённый токен
                 with open(token_path, 'w') as token:
                     token.write(oauth_creds.to_json())
+                logger.info("OAuth token refreshed and saved")
             
             # Создаем OAuth клиент
             self.oauth_client = gspread.authorize(oauth_creds)
