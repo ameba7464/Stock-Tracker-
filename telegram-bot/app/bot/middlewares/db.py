@@ -5,6 +5,7 @@ from aiogram.types import TelegramObject
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.database import async_session_maker
+from app.utils.logger import logger
 
 
 class DatabaseMiddleware(BaseMiddleware):
@@ -29,4 +30,9 @@ class DatabaseMiddleware(BaseMiddleware):
         """
         async with async_session_maker() as session:
             data['session'] = session
-            return await handler(event, data)
+            try:
+                return await handler(event, data)
+            except Exception as e:
+                await session.rollback()
+                logger.error(f"Database error, transaction rolled back: {e}")
+                raise

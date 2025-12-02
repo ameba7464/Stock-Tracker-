@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand, MenuButtonCommands
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 
@@ -26,6 +27,15 @@ USE_WEBHOOK = bool(WEBHOOK_HOST)
 async def on_startup(bot: Bot):
     """Действия при запуске бота."""
     logger.info("Bot is starting...")
+    
+    # Устанавливаем команды бота для кнопки "Меню"
+    commands = [
+        BotCommand(command="start", description="Главное меню"),
+        BotCommand(command="help", description="Помощь"),
+    ]
+    await bot.set_my_commands(commands)
+    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+    logger.info("Bot commands and menu button configured")
     
     # Логируем информацию о подключении к БД
     db_url = settings.get_database_url()
