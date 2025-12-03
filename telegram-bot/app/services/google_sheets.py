@@ -232,14 +232,14 @@ class GoogleSheetsService:
                 worksheet.update_title("Stock Tracker")
             
             # Преобразуем данные в формат для таблицы
-            table_data = self._prepare_table_data(data)
+            table_data, warehouse_names = self._prepare_table_data(data)
             
             # Очищаем и записываем новые данные
             worksheet.clear()
             worksheet.update('A1', table_data, value_input_option='USER_ENTERED')
             
             # Форматируем таблицу
-            await self._format_sheet(spreadsheet, worksheet)
+            await self._format_sheet(spreadsheet, worksheet, warehouse_names)
             
             logger.info(f"Sheet {sheet_id} updated successfully")
             return True
@@ -251,7 +251,7 @@ class GoogleSheetsService:
             logger.error(f"Error updating sheet: {e}", exc_info=True)
             return False
     
-    def _prepare_table_data(self, products: List[Any]) -> List[List[Any]]:
+    def _prepare_table_data(self, products: List[Any]) -> tuple:
         """
         Подготовка данных для таблицы.
         
@@ -259,10 +259,10 @@ class GoogleSheetsService:
             products: Список ProductMetrics
             
         Returns:
-            Список списков для Google Sheets
+            Tuple (данные для таблицы, список складов)
         """
         if not products:
-            return [["Нет данных"]]
+            return ([["Нет данных"]], [])
         
         # Получаем все уникальные склады
         all_warehouses = set()
@@ -349,15 +349,16 @@ class GoogleSheetsService:
             
             rows.append(row)
         
-        return rows
+        return (rows, list(all_warehouses))
     
-    async def _format_sheet(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet):
+    async def _format_sheet(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet, warehouse_names: List[str] = None):
         """
         Форматирование таблицы (заголовки, цвета, границы, объединение ячеек).
         
         Args:
             spreadsheet: Объект таблицы
             worksheet: Объект листа
+            warehouse_names: Список названий складов
         """
         try:
             # Получаем данные для определения количества строк и колонок
@@ -365,11 +366,13 @@ class GoogleSheetsService:
             data_rows_count = len(all_data) - 2 if len(all_data) > 2 else 0
             total_cols = len(all_data[0]) if all_data else 9
             
-            # Определяем количество складов (9 базовых колонок: 4 основных + 5 метрик)
-            num_warehouses = (total_cols - 9) // 3 if total_cols > 9 else 0
+            # Используем переданный список складов или вычисляем из данных
+            if warehouse_names is None:
+                warehouse_names = []
+            num_warehouses = len(warehouse_names)
             
             # 1. Объединяем ячейки заголовков групп
-            await self._merge_group_headers(spreadsheet, worksheet, num_warehouses)
+            await self._merge_group_headers(spreadsheet, worksheet, warehouse_names)
             
             # 2. Устанавливаем размеры колонок и строк
             await self._apply_dimension_properties(spreadsheet, worksheet, total_cols)
@@ -420,17 +423,18 @@ class GoogleSheetsService:
         except Exception as e:
             logger.error(f"Error formatting sheet: {e}", exc_info=True)
     
-    async def _merge_group_headers(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet, num_warehouses: int):
+    async def _merge_group_headers(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet, warehouse_names: List[str]):
         """
         Объединить ячейки для заголовков групп.
         
         Args:
             spreadsheet: Объект таблицы
             worksheet: Объект листа
-            num_warehouses: Количество складов
+            warehouse_names: Список названий складов
         """
         try:
             merge_requests = []
+            num_warehouses = len(warehouse_names) if warehouse_names else 0
             
             # Основная информация (A1:D1)
             merge_requests.append({
@@ -459,16 +463,6 @@ class GoogleSheetsService:
                     'mergeType': 'MERGE_ALL'
                 }
             })
-            
-            # Получаем названия складов из строки 1 ДО merge (они там записаны)
-            row1_data = worksheet.row_values(1)
-            warehouse_names = []
-            for i in range(num_warehouses):
-                col_idx = 9 + (i * 3)  # J, M, P, ... (индексы 9, 12, 15, ...)
-                if col_idx < len(row1_data) and row1_data[col_idx]:
-                    warehouse_names.append(row1_data[col_idx])
-                else:
-                    warehouse_names.append(f"Склад {i+1}")
             
             # Склады (каждый склад = 3 колонки, начиная с колонки J = индекс 9)
             for i in range(num_warehouses):
