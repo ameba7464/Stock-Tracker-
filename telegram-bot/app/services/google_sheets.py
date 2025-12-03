@@ -460,6 +460,16 @@ class GoogleSheetsService:
                 }
             })
             
+            # Получаем названия складов из строки 1 ДО merge (они там записаны)
+            row1_data = worksheet.row_values(1)
+            warehouse_names = []
+            for i in range(num_warehouses):
+                col_idx = 9 + (i * 3)  # J, M, P, ... (индексы 9, 12, 15, ...)
+                if col_idx < len(row1_data) and row1_data[col_idx]:
+                    warehouse_names.append(row1_data[col_idx])
+                else:
+                    warehouse_names.append(f"Склад {i+1}")
+            
             # Склады (каждый склад = 3 колонки, начиная с колонки J = индекс 9)
             for i in range(num_warehouses):
                 start_col = 9 + (i * 3)
@@ -482,13 +492,16 @@ class GoogleSheetsService:
             if merge_requests:
                 spreadsheet.batch_update({'requests': merge_requests})
             
-            # Записываем текст в объединенные ячейки
+            # Записываем текст в объединенные ячейки ПОСЛЕ merge
             worksheet.update(values=[['Основная информация']], range_name='A1')
             worksheet.update(values=[['Общие метрики']], range_name='E1')
             
-            # Названия складов уже записаны в prepare_table_data
+            # Записываем названия складов
+            for i, wh_name in enumerate(warehouse_names):
+                col_letter = self._col_number_to_letter(10 + (i * 3))  # J=10, M=13, P=16, ...
+                worksheet.update(values=[[wh_name]], range_name=f'{col_letter}1')
             
-            logger.debug(f"Merged cells for {num_warehouses} warehouses")
+            logger.debug(f"Merged cells for {num_warehouses} warehouses: {warehouse_names}")
             
         except Exception as e:
             logger.warning(f"Failed to merge cells: {e}")
@@ -703,6 +716,23 @@ class GoogleSheetsService:
             
         except Exception as e:
             logger.warning(f"Failed to apply borders: {e}")
+    
+    def _col_number_to_letter(self, n: int) -> str:
+        """
+        Конвертировать номер колонки в букву (1=A, 2=B, ..., 10=J, ...).
+        
+        Args:
+            n: Номер колонки (1-based)
+            
+        Returns:
+            Буква колонки (A, B, ..., Z, AA, AB, ...)
+        """
+        result = ""
+        while n > 0:
+            n -= 1
+            result = chr(n % 26 + ord('A')) + result
+            n //= 26
+        return result
 
 
 # Глобальный экземпляр сервиса
