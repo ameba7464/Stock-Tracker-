@@ -243,10 +243,10 @@ class GoogleSheetsService:
             worksheet.clear()
             worksheet.update('A1', table_data, value_input_option='USER_ENTERED')
             
-            # DEBUG: Проверяем что записалось
-            check_row1 = worksheet.row_values(1)
-            logger.info(f"After write, row 1 has {len(check_row1)} cells")
-            logger.info(f"After write, row 1 cells 8-14: {check_row1[8:15] if len(check_row1) > 14 else check_row1[8:]}")
+            # DEBUG: Проверяем что записалось - читаем конкретные ячейки со складами
+            check_j1 = worksheet.acell('J1').value  # Первый склад должен быть тут
+            check_m1 = worksheet.acell('M1').value  # Второй склад
+            logger.info(f"After write: J1='{check_j1}', M1='{check_m1}'")
             
             # Форматируем таблицу
             await self._format_sheet(spreadsheet, worksheet, warehouse_names)
