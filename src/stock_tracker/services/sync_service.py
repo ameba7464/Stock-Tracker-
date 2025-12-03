@@ -86,9 +86,13 @@ class SyncService:
             for mp_product in marketplace_products:
                 try:
                     # Получаем данные о складах для этого товара
-                    # nm_id в warehouse_data — int, wildberries_article — str, поэтому конвертируем
-                    nm_id_key = int(mp_product.wildberries_article) if mp_product.wildberries_article else None
-                    product_warehouse_data = warehouse_data.get(nm_id_key, {}) if nm_id_key else {}
+                    # wildberries_article — это int (nmId из API)
+                    nm_id = mp_product.wildberries_article
+                    product_warehouse_data = warehouse_data.get(nm_id, {})
+                    
+                    if product_warehouse_data:
+                        logger.debug(f"Found warehouse data for nmId {nm_id}: {len(product_warehouse_data.get('warehouses', []))} warehouses")
+                    
                     self._upsert_product(mp_product, product_warehouse_data)
                     stats["products_synced"] += 1
                 except Exception as e:
@@ -136,6 +140,8 @@ class SyncService:
             'Остальные'
         }
         
+        logger.debug(f"Indexing warehouse data from {len(warehouse_remains)} items")
+        
         for item in warehouse_remains:
             nm_id = item.get("nmId")
             if not nm_id:
@@ -157,6 +163,14 @@ class SyncService:
             else:
                 # Объединяем склады если продукт уже есть
                 indexed[nm_id]["warehouses"].extend(warehouses_list)
+        
+        # Логируем статистику
+        total_warehouses = sum(len(v.get("warehouses", [])) for v in indexed.values())
+        logger.info(f"Indexed {len(indexed)} products with {total_warehouses} total warehouse entries")
+        
+        if indexed:
+            sample_keys = list(indexed.keys())[:3]
+            logger.debug(f"Sample indexed nmIds: {sample_keys}")
         
         return indexed
     
