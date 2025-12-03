@@ -264,6 +264,11 @@ class GoogleSheetsService:
             end_col_letter = self._col_number_to_letter(num_cols_needed)
             data_range = f'A1:{end_col_letter}{num_rows_needed}'
             logger.info(f"Writing data to range: {data_range}")
+            
+            # DEBUG: Проверяем длину каждой строки
+            for i, row in enumerate(table_data[:3]):  # Первые 3 строки
+                logger.info(f"Row {i} length: {len(row)}, last 3 cells: {row[-3:] if len(row) >= 3 else row}")
+            
             worksheet.update(data_range, table_data, value_input_option='USER_ENTERED')
             
             # DEBUG: Проверяем что записалось - читаем конкретные ячейки со складами
