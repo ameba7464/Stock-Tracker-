@@ -565,10 +565,14 @@ class GoogleSheetsService:
             
             # Применяем объединение
             if merge_requests:
-                spreadsheet.batch_update({'requests': merge_requests})
+                try:
+                    spreadsheet.batch_update({'requests': merge_requests})
+                    logger.info(f"Merged cells for {num_warehouses} warehouses")
+                except Exception as merge_error:
+                    logger.warning(f"Merge failed (continuing anyway): {merge_error}")
             
-            # Перезаписываем текст в объединенные ячейки ПОСЛЕ merge 
-            # (merge очищает содержимое ячеек)
+            # Перезаписываем текст в ячейки НЕЗАВИСИМО от результата merge
+            # (merge очищает содержимое ячеек, но даже без merge нам нужны заголовки)
             # Собираем все обновления в один batch для эффективности
             batch_updates = [
                 {'range': 'A1', 'values': [['Основная информация']]},
@@ -579,12 +583,13 @@ class GoogleSheetsService:
             for i, wh_name in enumerate(warehouse_names):
                 col_letter = self._col_number_to_letter(10 + (i * 3))  # J=10, M=13, P=16, ...
                 batch_updates.append({'range': f'{col_letter}1', 'values': [[wh_name]]})
-                logger.debug(f"Adding warehouse header: {wh_name} at {col_letter}1")
+                if i < 3:  # Логируем первые 3 для отладки
+                    logger.info(f"Writing warehouse header: {wh_name} at {col_letter}1")
             
             # Применяем все обновления одним запросом
             worksheet.batch_update(batch_updates)
             
-            logger.info(f"Merged cells and wrote headers for {num_warehouses} warehouses: {warehouse_names}")
+            logger.info(f"Wrote headers for {num_warehouses} warehouses")
             
         except Exception as e:
             logger.warning(f"Failed to merge cells: {e}")
