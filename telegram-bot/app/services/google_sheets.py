@@ -260,7 +260,11 @@ class GoogleSheetsService:
                 logger.info(f"Resized sheet to {new_rows}x{new_cols}")
             
             # Записываем данные
-            worksheet.update('A1', table_data, value_input_option='USER_ENTERED')
+            # Используем update с явным диапазоном для всей таблицы
+            end_col_letter = self._col_number_to_letter(num_cols_needed)
+            data_range = f'A1:{end_col_letter}{num_rows_needed}'
+            logger.info(f"Writing data to range: {data_range}")
+            worksheet.update(data_range, table_data, value_input_option='USER_ENTERED')
             
             # DEBUG: Проверяем что записалось - читаем конкретные ячейки со складами
             check_j1 = worksheet.acell('J1').value  # Первый склад должен быть тут
