@@ -315,7 +315,7 @@ class GoogleSheetsService:
         # Данные
         rows = [header_row1, header_row2]
         
-        for product in products:
+        for i, product in enumerate(products):
             # Рассчитываем общую оборачиваемость в днях
             # Формула: Остатки / (Заказы / Период) = Остатки * Период / Заказы
             # Период по умолчанию 7 дней (стандартный период WB API)
@@ -323,6 +323,10 @@ class GoogleSheetsService:
                 total_turnover = round((product.stocks_total * 7) / product.orders_total, 1)
             else:
                 total_turnover = 0
+            
+            # Отладочная информация для первых товаров
+            if i < 3:
+                logger.debug(f"Product {product.nm_id}: in_transit_to_customer={product.in_transit_to_customer}, in_transit_to_wb={product.in_transit_to_wb_warehouse}, stocks_by_warehouse keys={list(product.stocks_by_warehouse.keys())[:3]}")
             
             row = [
                 product.brand,
@@ -438,8 +442,32 @@ class GoogleSheetsService:
             warehouse_names: Список названий складов
         """
         try:
-            merge_requests = []
             num_warehouses = len(warehouse_names) if warehouse_names else 0
+            
+            # Сначала разъединяем все ячейки в первой строке, чтобы избежать ошибок
+            # Вычисляем общее количество колонок: 4 (базовые) + 5 (метрики) + 3*склады
+            total_cols = 9 + (num_warehouses * 3)
+            
+            unmerge_requests = [{
+                'unmergeCells': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 0,
+                        'endRowIndex': 1,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': total_cols
+                    }
+                }
+            }]
+            
+            try:
+                spreadsheet.batch_update({'requests': unmerge_requests})
+                logger.debug("Unmerged all cells in header row")
+            except Exception as e:
+                logger.debug(f"Unmerge skipped (probably no merged cells): {e}")
+            
+            # Теперь объединяем ячейки
+            merge_requests = []
             
             # Основная информация (A1:D1)
             merge_requests.append({
