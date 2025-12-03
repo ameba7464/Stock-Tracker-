@@ -61,9 +61,22 @@ class SyncService:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
+                # Получаем продукты из Analytics API v2
                 marketplace_products = loop.run_until_complete(
                     self.marketplace_client.fetch_products(limit=1000)
                 )
+                
+                # Получаем данные по складам из Warehouse API v1
+                warehouse_data = {}
+                try:
+                    warehouse_remains = loop.run_until_complete(
+                        self.marketplace_client.api_client.get_warehouse_remains_with_retry(max_wait_time=600)
+                    )
+                    # Индексируем данные по nmId для быстрого поиска
+                    warehouse_data = self._index_warehouse_data(warehouse_remains)
+                    logger.info(f"Fetched warehouse data for {len(warehouse_data)} products")
+                except Exception as e:
+                    logger.warning(f"Failed to fetch warehouse data: {e}. Products will have no warehouse breakdown.")
             finally:
                 loop.close()
             
@@ -72,7 +85,9 @@ class SyncService:
             # Process each product
             for mp_product in marketplace_products:
                 try:
-                    self._upsert_product(mp_product)
+                    # Получаем данные о складах для этого товара
+                    product_warehouse_data = warehouse_data.get(mp_product.wildberries_article, {})
+                    self._upsert_product(mp_product, product_warehouse_data)
                     stats["products_synced"] += 1
                 except Exception as e:
                     error_msg = f"Failed to sync product {mp_product.wildberries_article}: {e}"
@@ -99,29 +114,91 @@ class SyncService:
             self.db.rollback()
             raise
     
-    def _upsert_product(self, mp_product) -> Product:
+    def _index_warehouse_data(self, warehouse_remains: List[Dict[str, Any]]) -> Dict[int, Dict[str, Any]]:
+        """
+        Индексирует данные о складах по nmId для быстрого поиска.
+        
+        Args:
+            warehouse_remains: Данные из Warehouse API v1
+            
+        Returns:
+            Dict[nmId -> warehouse_data_dict]
+        """
+        indexed = {}
+        
+        # Служебные склады для исключения
+        service_warehouses = {
+            'В пути до получателей',
+            'В пути возвраты на склад WB',
+            'Всего находится на складах',
+            'Остальные'
+        }
+        
+        for item in warehouse_remains:
+            nm_id = item.get("nmId")
+            if not nm_id:
+                continue
+            
+            # Обрабатываем склады из записи
+            warehouses_list = []
+            for wh in item.get("warehouses", []):
+                wh_name = wh.get("warehouseName", "")
+                if wh_name and wh_name not in service_warehouses:
+                    warehouses_list.append({
+                        "name": wh_name,
+                        "stock": wh.get("quantity", 0),
+                        "orders": 0  # API v1 не содержит заказы, добавим позже из v2
+                    })
+            
+            if nm_id not in indexed:
+                indexed[nm_id] = {"warehouses": warehouses_list}
+            else:
+                # Объединяем склады если продукт уже есть
+                indexed[nm_id]["warehouses"].extend(warehouses_list)
+        
+        return indexed
+    
+    def _upsert_product(self, mp_product, warehouse_data: Dict[str, Any] = None) -> Product:
         """
         Insert or update product in database.
         
         Args:
             mp_product: Product object from marketplace client
+            warehouse_data: Данные о складах из Warehouse API v1
             
         Returns:
             Product database model
         """
+        if warehouse_data is None:
+            warehouse_data = {}
+            
         # Find existing product
         existing = self.db.query(Product).filter(
             Product.tenant_id == self.tenant.id,
             Product.marketplace_article == str(mp_product.wildberries_article)
         ).first()
         
+        # Подготавливаем warehouse_data с заказами, распределёнными пропорционально
+        wh_list = warehouse_data.get("warehouses", [])
+        total_stock = sum(wh.get("stock", 0) for wh in wh_list)
+        total_orders = mp_product.total_orders
+        
+        if total_stock > 0 and total_orders > 0:
+            for wh in wh_list:
+                wh_stock = wh.get("stock", 0)
+                # Распределяем заказы пропорционально остаткам
+                wh["orders"] = int(total_orders * (wh_stock / total_stock))
+        
+        warehouse_data_to_save = {"warehouses": wh_list} if wh_list else {}
+        
         if existing:
             # Update existing
             existing.seller_article = mp_product.seller_article or existing.seller_article
             existing.total_stock = mp_product.total_stock
             existing.total_orders = mp_product.total_orders
+            existing.warehouse_data = warehouse_data_to_save
             existing.last_synced_at = datetime.utcnow()
-            logger.debug(f"Updated product {existing.marketplace_article}")
+            logger.debug(f"Updated product {existing.marketplace_article} with {len(wh_list)} warehouses")
             return existing
         else:
             # Create new
@@ -131,11 +208,12 @@ class SyncService:
                 seller_article=mp_product.seller_article or f"WB-{mp_product.wildberries_article}",
                 total_stock=mp_product.total_stock,
                 total_orders=mp_product.total_orders,
+                warehouse_data=warehouse_data_to_save,
                 last_synced_at=datetime.utcnow(),
                 created_at=datetime.utcnow(),
             )
             self.db.add(new_product)
-            logger.debug(f"Created product {new_product.marketplace_article}")
+            logger.debug(f"Created product {new_product.marketplace_article} with {len(wh_list)} warehouses")
             return new_product
     
     def get_product_count(self) -> int:

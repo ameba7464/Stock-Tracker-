@@ -276,7 +276,7 @@ class GoogleSheetsService:
                 }
             })
             
-            # Общие метрики (E1:J1)
+            # Общие метрики (E1:I1) - 5 колонок
             merge_requests.append({
                 'mergeCells': {
                     'range': {
@@ -316,8 +316,11 @@ class GoogleSheetsService:
             worksheet.update(values=[[self.HEADER_GROUP_GENERAL_METRICS]], range_name='E1')
             
             # Записываем названия складов
+            # Первый склад начинается с колонки J (10-я колонка, 1-based)
+            # NUM_BASE_INFO_COLS(4) + NUM_GENERAL_METRICS_COLS(5) + 1 = 10 (колонка J)
+            warehouse_start_col = self.NUM_BASE_INFO_COLS + self.NUM_GENERAL_METRICS_COLS + 1  # = 10 (J)
             for i, warehouse in enumerate(warehouses):
-                col_letter = self._col_number_to_letter(11 + (i * self.NUM_WAREHOUSE_COLS))  # K, N, Q, ...
+                col_letter = self._col_number_to_letter(warehouse_start_col + (i * self.NUM_WAREHOUSE_COLS))  # J, M, P, ...
                 worksheet.update(values=[[warehouse]], range_name=f'{col_letter}1')
             
             logger.debug(f"Merged cells for {len(warehouses)} warehouses")

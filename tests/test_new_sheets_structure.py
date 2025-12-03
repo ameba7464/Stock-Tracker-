@@ -93,11 +93,11 @@ class TestGoogleSheetsStructure:
     def test_header_constants(self):
         """Проверить константы заголовков."""
         assert GoogleSheetsService.NUM_BASE_INFO_COLS == 4
-        assert GoogleSheetsService.NUM_GENERAL_METRICS_COLS == 6
+        assert GoogleSheetsService.NUM_GENERAL_METRICS_COLS == 5
         assert GoogleSheetsService.NUM_WAREHOUSE_COLS == 3
         
         assert len(GoogleSheetsService.HEADER_ROW2_BASE) == 4
-        assert len(GoogleSheetsService.HEADER_ROW2_GENERAL) == 6
+        assert len(GoogleSheetsService.HEADER_ROW2_GENERAL) == 5
         assert len(GoogleSheetsService.HEADER_ROW2_WAREHOUSE) == 3
     
     def test_col_number_to_letter(self, mock_tenant):
