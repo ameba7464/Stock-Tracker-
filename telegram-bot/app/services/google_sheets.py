@@ -277,10 +277,10 @@ class GoogleSheetsService:
             logger.info(f"Re-writing header row to {header_range}")
             worksheet.update(header_range, [header_row1], value_input_option='USER_ENTERED')
             
-            # DEBUG: Проверяем что записалось - читаем конкретные ячейки со складами
+            # DEBUG: Проверяем что записалось - читаем конкретные ячейки со складами ПОСЛЕ перезаписи
             check_j1 = worksheet.acell('J1').value  # Первый склад должен быть тут
             check_m1 = worksheet.acell('M1').value  # Второй склад
-            logger.info(f"After write: J1='{check_j1}', M1='{check_m1}'")
+            logger.info(f"After header rewrite: J1='{check_j1}', M1='{check_m1}'")
             
             # Форматируем таблицу
             await self._format_sheet(spreadsheet, worksheet, warehouse_names)
