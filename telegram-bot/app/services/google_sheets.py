@@ -271,6 +271,12 @@ class GoogleSheetsService:
             
             worksheet.update(data_range, table_data, value_input_option='USER_ENTERED')
             
+            # DEBUG: Попробуем записать первую строку отдельно
+            header_row1 = table_data[0]
+            header_range = f'A1:{end_col_letter}1'
+            logger.info(f"Re-writing header row to {header_range}")
+            worksheet.update(header_range, [header_row1], value_input_option='USER_ENTERED')
+            
             # DEBUG: Проверяем что записалось - читаем конкретные ячейки со складами
             check_j1 = worksheet.acell('J1').value  # Первый склад должен быть тут
             check_m1 = worksheet.acell('M1').value  # Второй склад
