@@ -312,10 +312,15 @@ class WildberriesDataCollector:
         
         # Индексируем по nmId для быстрого доступа
         warehouse_by_nm = {}
+        total_warehouse_entries = 0
         for item in warehouse_data:
             nm_id = item.get('nmId')
             if nm_id:
                 warehouse_by_nm[nm_id] = item
+                warehouses_in_item = item.get('warehouses', [])
+                total_warehouse_entries += len(warehouses_in_item)
+        
+        print(f"📦 Индексировано {len(warehouse_by_nm)} товаров с {total_warehouse_entries} складскими записями")
         
         # 3. Получаем заказы
         print("\n🛒 ШАГ 3/3: Supplier Orders API")

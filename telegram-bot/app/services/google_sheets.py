@@ -262,7 +262,10 @@ class GoogleSheetsService:
             Tuple (данные для таблицы, список складов)
         """
         if not products:
+            logger.warning("No products to prepare for table")
             return ([["Нет данных"]], [])
+        
+        logger.info(f"Preparing table data for {len(products)} products")
         
         # Получаем все уникальные склады
         all_warehouses = set()
@@ -282,6 +285,8 @@ class GoogleSheetsService:
                     all_warehouses.add(wh)
         
         all_warehouses = sorted(all_warehouses)
+        
+        logger.info(f"Found {len(all_warehouses)} unique warehouses: {list(all_warehouses)[:5]}...")  # Показываем первые 5
         
         # Строка 1: Группы колонок (записываем текст сразу, чтобы он был виден даже без merge)
         header_row1 = ['Основная информация', '', '', '']  # Основная информация
