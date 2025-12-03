@@ -488,13 +488,20 @@ class GoogleSheetsService:
             
             # Перезаписываем текст в объединенные ячейки ПОСЛЕ merge 
             # (merge очищает содержимое ячеек)
-            worksheet.update(values=[['Основная информация']], range_name='A1')
-            worksheet.update(values=[['Общие метрики']], range_name='E1')
+            # Собираем все обновления в один batch для эффективности
+            batch_updates = [
+                {'range': 'A1', 'values': [['Основная информация']]},
+                {'range': 'E1', 'values': [['Общие метрики']]}
+            ]
             
-            # Записываем названия складов
+            # Добавляем названия складов
             for i, wh_name in enumerate(warehouse_names):
                 col_letter = self._col_number_to_letter(10 + (i * 3))  # J=10, M=13, P=16, ...
-                worksheet.update(values=[[wh_name]], range_name=f'{col_letter}1')
+                batch_updates.append({'range': f'{col_letter}1', 'values': [[wh_name]]})
+                logger.debug(f"Adding warehouse header: {wh_name} at {col_letter}1")
+            
+            # Применяем все обновления одним запросом
+            worksheet.batch_update(batch_updates)
             
             logger.info(f"Merged cells and wrote headers for {num_warehouses} warehouses: {warehouse_names}")
             
