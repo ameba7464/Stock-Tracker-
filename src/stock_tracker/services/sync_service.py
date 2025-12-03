@@ -86,7 +86,9 @@ class SyncService:
             for mp_product in marketplace_products:
                 try:
                     # Получаем данные о складах для этого товара
-                    product_warehouse_data = warehouse_data.get(mp_product.wildberries_article, {})
+                    # nm_id в warehouse_data — int, wildberries_article — str, поэтому конвертируем
+                    nm_id_key = int(mp_product.wildberries_article) if mp_product.wildberries_article else None
+                    product_warehouse_data = warehouse_data.get(nm_id_key, {}) if nm_id_key else {}
                     self._upsert_product(mp_product, product_warehouse_data)
                     stats["products_synced"] += 1
                 except Exception as e:
