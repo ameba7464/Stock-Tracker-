@@ -289,11 +289,15 @@ class GoogleSheetsService:
         logger.info(f"Found {len(all_warehouses)} unique warehouses: {list(all_warehouses)[:5]}...")  # Показываем первые 5
         
         # Строка 1: Группы колонок (записываем текст сразу, чтобы он был виден даже без merge)
-        header_row1 = ['Основная информация', '', '', '']  # Основная информация
+        header_row1 = ['Основная информация', '', '', '']  # Основная информация (4 колонки)
         header_row1.extend(['Общие метрики', '', '', '', ''])     # Общие метрики (5 колонок)
         
         for warehouse in all_warehouses:
             header_row1.extend([warehouse, '', ''])
+        
+        # DEBUG: Логируем первую строку
+        logger.info(f"Header row 1 (first 15 cells): {header_row1[:15]}")
+        logger.info(f"Header row 1 total length: {len(header_row1)}")
         
         # Строка 2: Названия колонок
         header_row2 = [
