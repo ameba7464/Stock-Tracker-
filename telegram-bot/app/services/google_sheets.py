@@ -239,8 +239,27 @@ class GoogleSheetsService:
                 logger.info(f"Writing table_data: first row has {len(table_data[0])} cells")
                 logger.info(f"First row preview (cells 8-14): {table_data[0][8:15] if len(table_data[0]) > 14 else table_data[0][8:]}")
             
-            # Очищаем и записываем новые данные
+            # Очищаем лист
             worksheet.clear()
+            
+            # Расширяем лист если нужно больше колонок
+            num_cols_needed = len(table_data[0]) if table_data else 26
+            num_rows_needed = len(table_data) if table_data else 100
+            
+            # Получаем текущий размер листа
+            current_cols = worksheet.col_count
+            current_rows = worksheet.row_count
+            
+            logger.info(f"Sheet size: {current_rows}x{current_cols}, need: {num_rows_needed}x{num_cols_needed}")
+            
+            # Расширяем если нужно
+            if current_cols < num_cols_needed or current_rows < num_rows_needed:
+                new_cols = max(current_cols, num_cols_needed)
+                new_rows = max(current_rows, num_rows_needed)
+                worksheet.resize(rows=new_rows, cols=new_cols)
+                logger.info(f"Resized sheet to {new_rows}x{new_cols}")
+            
+            # Записываем данные
             worksheet.update('A1', table_data, value_input_option='USER_ENTERED')
             
             # DEBUG: Проверяем что записалось - читаем конкретные ячейки со складами
