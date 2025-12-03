@@ -283,9 +283,9 @@ class GoogleSheetsService:
         
         all_warehouses = sorted(all_warehouses)
         
-        # Строка 1: Группы колонок
-        header_row1 = ['', '', '', '']  # Основная информация
-        header_row1.extend([''] * 5)     # Общие метрики (без "Всего заказов на складах WB")
+        # Строка 1: Группы колонок (записываем текст сразу, чтобы он был виден даже без merge)
+        header_row1 = ['Основная информация', '', '', '']  # Основная информация
+        header_row1.extend(['Общие метрики', '', '', '', ''])     # Общие метрики (5 колонок)
         
         for warehouse in all_warehouses:
             header_row1.extend([warehouse, '', ''])
@@ -486,7 +486,8 @@ class GoogleSheetsService:
             if merge_requests:
                 spreadsheet.batch_update({'requests': merge_requests})
             
-            # Записываем текст в объединенные ячейки ПОСЛЕ merge
+            # Перезаписываем текст в объединенные ячейки ПОСЛЕ merge 
+            # (merge очищает содержимое ячеек)
             worksheet.update(values=[['Основная информация']], range_name='A1')
             worksheet.update(values=[['Общие метрики']], range_name='E1')
             
@@ -495,7 +496,7 @@ class GoogleSheetsService:
                 col_letter = self._col_number_to_letter(10 + (i * 3))  # J=10, M=13, P=16, ...
                 worksheet.update(values=[[wh_name]], range_name=f'{col_letter}1')
             
-            logger.debug(f"Merged cells for {num_warehouses} warehouses: {warehouse_names}")
+            logger.info(f"Merged cells and wrote headers for {num_warehouses} warehouses: {warehouse_names}")
             
         except Exception as e:
             logger.warning(f"Failed to merge cells: {e}")
