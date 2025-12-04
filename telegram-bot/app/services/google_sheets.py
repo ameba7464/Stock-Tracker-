@@ -265,54 +265,10 @@ class GoogleSheetsService:
             data_range = f'A1:{end_col_letter}{num_rows_needed}'
             logger.info(f"Writing data to range: {data_range}")
             
-            # DEBUG: Проверяем длину каждой строки
-            for i, row in enumerate(table_data[:3]):  # Первые 3 строки
-                logger.info(f"Row {i} length: {len(row)}, last 3 cells: {row[-3:] if len(row) >= 3 else row}")
-            
             worksheet.update(data_range, table_data, value_input_option='USER_ENTERED')
+            logger.info("Table data written successfully")
             
-            # DEBUG: Попробуем записать первую строку отдельно
-            header_row1 = table_data[0]
-            header_range = f'A1:{end_col_letter}1'
-            logger.info(f"Re-writing header row to {header_range}")
-            worksheet.update(header_range, [header_row1], value_input_option='USER_ENTERED')
-            
-            # DEBUG: Проверяем что записалось - читаем конкретные ячейки со складами ПОСЛЕ перезаписи
-            check_j1 = worksheet.acell('J1').value  # Первый склад должен быть тут
-            check_m1 = worksheet.acell('M1').value  # Второй склад
-            logger.info(f"After header rewrite: J1='{check_j1}', M1='{check_m1}'")
-            
-            # ПРИНУДИТЕЛЬНО ОЧИЩАЕМ ВСЕ MERGED CELLS перед форматированием
-            try:
-                # Размерживаем все возможные ячейки в первой строке
-                for start_col in range(0, total_cols, 3):
-                    try:
-                        end_col = min(start_col + 3, total_cols)
-                        unmerge_req = {
-                            'unmergeCells': {
-                                'range': {
-                                    'sheetId': worksheet.id,
-                                    'startRowIndex': 0,
-                                    'endRowIndex': 1,
-                                    'startColumnIndex': start_col,
-                                    'endColumnIndex': end_col
-                                }
-                            }
-                        }
-                        spreadsheet.batch_update({'requests': [unmerge_req]})
-                    except:
-                        pass  # Игнорируем ошибки если нечего размерживать
-                logger.info("Force unmerged all cells in header row")
-            except Exception as unmerge_error:
-                logger.debug(f"Force unmerge failed (ok): {unmerge_error}")
-            
-            # Записываем названия складов ОТДЕЛЬНО (без merge)
-            await self._write_warehouse_headers_only(spreadsheet, worksheet, warehouse_names)
-            
-            # 1. Сначала объединяем ячейки для красивого вида
-            await self._merge_group_headers(spreadsheet, worksheet, warehouse_names)
-            
-            # 2. Затем форматируем таблицу (с merge для синего цвета)
+            # Форматируем таблицу (названия складов теперь во второй строке!)
             await self._format_sheet(spreadsheet, worksheet, warehouse_names)
             
             logger.info(f"Sheet {sheet_id} updated successfully")
@@ -362,18 +318,19 @@ class GoogleSheetsService:
         
         logger.info(f"Found {len(all_warehouses)} unique warehouses: {list(all_warehouses)[:5]}...")  # Показываем первые 5
         
-        # Строка 1: Группы колонок (записываем текст сразу, чтобы он был виден даже без merge)
+        # Строка 1: Группы колонок (БЕЗ названий складов - только группы)
         header_row1 = ['Основная информация', '', '', '']  # Основная информация (4 колонки)
         header_row1.extend(['Общие метрики', '', '', '', ''])     # Общие метрики (5 колонок)
         
+        # Добавляем просто "Склады" для всех складов
         for warehouse in all_warehouses:
-            header_row1.extend([warehouse, '', ''])
+            header_row1.extend(['Склады', '', ''])
         
         # DEBUG: Логируем первую строку
         logger.info(f"Header row 1 (first 15 cells): {header_row1[:15]}")
         logger.info(f"Header row 1 total length: {len(header_row1)}")
         
-        # Строка 2: Названия колонок
+        # Строка 2: Названия колонок ВКЛЮЧАЯ названия складов
         header_row2 = [
             'Бренд',
             'Предмет',
@@ -381,14 +338,18 @@ class GoogleSheetsService:
             'Артикул товара (nmid)',
             'В пути до покупателя',
             'В пути конв. на склад WB',
-            # 'Всего заказов на складах WB',  # Убрана метрика
             'Заказы (всего)',
             'Остатки (всего)',
             'Оборачиваемость (дни)'
         ]
         
-        for _ in all_warehouses:
-            header_row2.extend(['Остатки', 'Заказы', 'Оборач.'])
+        # Добавляем НАЗВАНИЯ СКЛАДОВ во вторую строку
+        for warehouse in all_warehouses:
+            header_row2.extend([f'{warehouse} (Остатки)', f'{warehouse} (Заказы)', f'{warehouse} (Оборач.)'])
+            
+        # DEBUG: Логируем вторую строку
+        logger.info(f"Header row 2 with warehouse names (first 15 cells): {header_row2[:15]}")
+        logger.info(f"Header row 2 total length: {len(header_row2)}")
         
         # Данные
         rows = [header_row1, header_row2]
@@ -607,18 +568,16 @@ class GoogleSheetsService:
                 worksheet.update('A1', [['Основная информация']])
                 worksheet.update('E1', [['Общие метрики']])
                 
-                # Записываем названия складов по одному
-                for i, wh_name in enumerate(warehouse_names):
+                # Записываем просто "Склады" для каждой группы (названия складов теперь во 2й строке!)
+                for i in range(num_warehouses):
                     col_num = 10 + (i * 3)  # J=10, M=13, P=16, ...
                     col_letter = self._col_number_to_letter(col_num)
-                    worksheet.update(f'{col_letter}1', [[wh_name]])
-                    if i < 3:  # Логируем первые 3
-                        logger.info(f"Writing warehouse header: {wh_name} at {col_letter}1")
+                    worksheet.update(f'{col_letter}1', [['Склады']])
                 
-                logger.info(f"Wrote headers for {num_warehouses} warehouses")
+                logger.info(f"Wrote group headers (Склады x{num_warehouses})")
                 
             except Exception as header_error:
-                logger.warning(f"Failed to write headers after merge: {header_error}")
+                logger.warning(f"Failed to write group headers after merge: {header_error}")
             
         except Exception as e:
             logger.warning(f"Failed to merge cells: {e}")
@@ -852,28 +811,8 @@ class GoogleSheetsService:
         return result
     
     async def _write_warehouse_headers_only(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet, warehouse_names: List[str]):
-        """Записать только названия складов в первую строку"""
-        if not warehouse_names:
-            return
-        
-        try:
-            logger.info(f"Writing warehouse headers for {len(warehouse_names)} warehouses")
-            
-            # Записываем каждый склад в соответствующую ячейку
-            for i, warehouse in enumerate(warehouse_names):
-                # Склад начинается с колонки J (10-я), потом каждый следующий через 3 колонки
-                col_num = 10 + (i * 3)  # J=10, M=13, P=16, etc.
-                col_letter = self._col_number_to_letter(col_num)
-                cell_address = f"{col_letter}1"
-                
-                # Прямая запись в ячейку с правильным форматом
-                worksheet.update(cell_address, [[warehouse]])
-                logger.info(f"Wrote '{warehouse}' to {cell_address}")
-            
-            logger.info("All warehouse headers written successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to write warehouse headers: {e}", exc_info=True)
+        """НЕ ИСПОЛЬЗУЕТСЯ - склады теперь во второй строке"""
+        pass
     
     async def _format_sheet_no_merge(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet, warehouse_names: List[str] = None):
         """Форматирование БЕЗ merge cells"""
