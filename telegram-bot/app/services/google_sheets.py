@@ -285,8 +285,11 @@ class GoogleSheetsService:
             # Записываем названия складов ОТДЕЛЬНО (без merge)
             await self._write_warehouse_headers_only(spreadsheet, worksheet, warehouse_names)
             
-            # Форматируем таблицу БЕЗ merge
-            await self._format_sheet_no_merge(spreadsheet, worksheet, warehouse_names)
+            # 1. Сначала объединяем ячейки для красивого вида
+            await self._merge_group_headers(spreadsheet, worksheet, warehouse_names)
+            
+            # 2. Затем форматируем таблицу (с merge для синего цвета)
+            await self._format_sheet(spreadsheet, worksheet, warehouse_names)
             
             logger.info(f"Sheet {sheet_id} updated successfully")
             return True
@@ -574,25 +577,24 @@ class GoogleSheetsService:
                 except Exception as merge_error:
                     logger.warning(f"Merge failed (continuing anyway): {merge_error}")
             
-            # Перезаписываем текст в ячейки НЕЗАВИСИМО от результата merge
-            # (merge очищает содержимое ячеек, но даже без merge нам нужны заголовки)
-            # Собираем все обновления в один batch для эффективности
-            batch_updates = [
-                {'range': 'A1', 'values': [['Основная информация']]},
-                {'range': 'E1', 'values': [['Общие метрики']]}
-            ]
-            
-            # Добавляем названия складов
-            for i, wh_name in enumerate(warehouse_names):
-                col_letter = self._col_number_to_letter(10 + (i * 3))  # J=10, M=13, P=16, ...
-                batch_updates.append({'range': f'{col_letter}1', 'values': [[wh_name]]})
-                if i < 3:  # Логируем первые 3 для отладки
-                    logger.info(f"Writing warehouse header: {wh_name} at {col_letter}1")
-            
-            # Применяем все обновления одним запросом
-            worksheet.batch_update(batch_updates)
-            
-            logger.info(f"Wrote headers for {num_warehouses} warehouses")
+            # Перезаписываем текст в ячейки ПОСЛЕ merge (merge очищает содержимое)
+            try:
+                # Записываем группы заголовков
+                worksheet.update('A1', 'Основная информация')
+                worksheet.update('E1', 'Общие метрики')
+                
+                # Записываем названия складов по одному
+                for i, wh_name in enumerate(warehouse_names):
+                    col_num = 10 + (i * 3)  # J=10, M=13, P=16, ...
+                    col_letter = self._col_number_to_letter(col_num)
+                    worksheet.update(f'{col_letter}1', wh_name)
+                    if i < 3:  # Логируем первые 3
+                        logger.info(f"Writing warehouse header: {wh_name} at {col_letter}1")
+                
+                logger.info(f"Wrote headers for {num_warehouses} warehouses")
+                
+            except Exception as header_error:
+                logger.warning(f"Failed to write headers after merge: {header_error}")
             
         except Exception as e:
             logger.warning(f"Failed to merge cells: {e}")
@@ -865,7 +867,7 @@ class GoogleSheetsService:
             await self._format_headers_no_merge(spreadsheet, worksheet, total_cols, num_warehouses)
             
             # 3. Применяем границы
-            await self._apply_borders(spreadsheet, worksheet, data_rows_count)
+            await self._apply_borders(spreadsheet, worksheet, total_cols, data_rows_count, num_warehouses)
             
             logger.info(f"Sheet formatted successfully (warehouses: {num_warehouses}, rows: {data_rows_count}) WITHOUT MERGE")
             
