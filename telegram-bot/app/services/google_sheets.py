@@ -318,22 +318,22 @@ class GoogleSheetsService:
         
         logger.info(f"Found {len(all_warehouses)} unique warehouses: {list(all_warehouses)[:5]}...")  # Показываем первые 5
         
-        # Строка 1: Группы колонок (БЕЗ названий складов - только группы)
-        header_row1 = ['Основная информация', '', '', '']  # Основная информация (4 колонки)
-        header_row1.extend(['Общие метрики', '', '', '', ''])     # Общие метрики (5 колонок)
+        # Строка 1: Группы колонок с названиями складов (КАК И ДОЛЖНО БЫТЬ!)
+        header_row1 = ['Основная информация', '', '', '']  # A1:D1 (4 колонки)
+        header_row1.extend(['Общие метрики', '', '', '', ''])     # E1:I1 (5 колонок)
         
-        # Добавляем просто "Склады" для всех складов
+        # Добавляем НАЗВАНИЯ СКЛАДОВ в первую строку
         for warehouse in all_warehouses:
-            header_row1.extend(['Склады', '', ''])
+            header_row1.extend([warehouse, '', ''])  # J1, M1, P1... (3 колонки каждый)
         
         # DEBUG: Логируем первую строку
         logger.info(f"Header row 1 (first 15 cells): {header_row1[:15]}")
         logger.info(f"Header row 1 total length: {len(header_row1)}")
         
-        # Строка 2: Названия колонок ВКЛЮЧАЯ названия складов
+        # Строка 2: Подзаголовки колонок
         header_row2 = [
             'Бренд',
-            'Предмет',
+            'Предмет', 
             'Артикул продавца',
             'Артикул товара (nmid)',
             'В пути до покупателя',
@@ -343,12 +343,12 @@ class GoogleSheetsService:
             'Оборачиваемость (дни)'
         ]
         
-        # Добавляем НАЗВАНИЯ СКЛАДОВ во вторую строку
-        for warehouse in all_warehouses:
-            header_row2.extend([f'{warehouse} (Остатки)', f'{warehouse} (Заказы)', f'{warehouse} (Оборач.)'])
+        # Добавляем подзаголовки для складов
+        for _ in all_warehouses:
+            header_row2.extend(['Остатки', 'Заказы', 'Оборач.'])
             
         # DEBUG: Логируем вторую строку
-        logger.info(f"Header row 2 with warehouse names (first 15 cells): {header_row2[:15]}")
+        logger.info(f"Header row 2 (subheaders, first 15 cells): {header_row2[:15]}")
         logger.info(f"Header row 2 total length: {len(header_row2)}")
         
         # Данные
@@ -522,15 +522,15 @@ class GoogleSheetsService:
                 }
             })
             
-            # Общие метрики (E1:I1) - 5 колонок после удаления "Всего заказов на складах WB"
+            # Общие метрики (E1:I1) - ПРАВИЛЬНО: 5 колонок с 4 по 8 (E,F,G,H,I)
             merge_requests.append({
                 'mergeCells': {
                     'range': {
                         'sheetId': worksheet.id,
                         'startRowIndex': 0,
                         'endRowIndex': 1,
-                        'startColumnIndex': 4,
-                        'endColumnIndex': 9
+                        'startColumnIndex': 4,  # E = 4
+                        'endColumnIndex': 9     # I = 8, но endColumnIndex НЕ ВКЛЮЧАЕТСЯ, так что 9
                     },
                     'mergeType': 'MERGE_ALL'
                 }
@@ -538,8 +538,8 @@ class GoogleSheetsService:
             
             # Склады (каждый склад = 3 колонки, начиная с колонки J = индекс 9)
             for i in range(num_warehouses):
-                start_col = 9 + (i * 3)
-                end_col = start_col + 3
+                start_col = 9 + (i * 3)  # J=9, M=12, P=15, etc.
+                end_col = start_col + 3   # L=12, O=15, S=18, etc.
                 
                 merge_requests.append({
                     'mergeCells': {
@@ -568,16 +568,18 @@ class GoogleSheetsService:
                 worksheet.update('A1', [['Основная информация']])
                 worksheet.update('E1', [['Общие метрики']])
                 
-                # Записываем просто "Склады" для каждой группы (названия складов теперь во 2й строке!)
-                for i in range(num_warehouses):
+                # Записываем НАЗВАНИЯ СКЛАДОВ в первую строку (как и должно быть!)
+                for i, wh_name in enumerate(warehouse_names):
                     col_num = 10 + (i * 3)  # J=10, M=13, P=16, ...
                     col_letter = self._col_number_to_letter(col_num)
-                    worksheet.update(f'{col_letter}1', [['Склады']])
+                    worksheet.update(f'{col_letter}1', [[wh_name]])
+                    if i < 3:  # Логируем первые 3
+                        logger.info(f"Writing warehouse header: {wh_name} at {col_letter}1")
                 
-                logger.info(f"Wrote group headers (Склады x{num_warehouses})")
+                logger.info(f"Wrote warehouse names in ROW 1 for {num_warehouses} warehouses")
                 
             except Exception as header_error:
-                logger.warning(f"Failed to write group headers after merge: {header_error}")
+                logger.warning(f"Failed to write headers after merge: {header_error}")
             
         except Exception as e:
             logger.warning(f"Failed to merge cells: {e}")
