@@ -282,8 +282,11 @@ class GoogleSheetsService:
             check_m1 = worksheet.acell('M1').value  # Второй склад
             logger.info(f"After header rewrite: J1='{check_j1}', M1='{check_m1}'")
             
-            # Форматируем таблицу
-            await self._format_sheet(spreadsheet, worksheet, warehouse_names)
+            # Записываем названия складов ОТДЕЛЬНО (без merge)
+            await self._write_warehouse_headers_only(spreadsheet, worksheet, warehouse_names)
+            
+            # Форматируем таблицу БЕЗ merge
+            await self._format_sheet_no_merge(spreadsheet, worksheet, warehouse_names)
             
             logger.info(f"Sheet {sheet_id} updated successfully")
             return True
@@ -821,6 +824,87 @@ class GoogleSheetsService:
             result = chr(n % 26 + ord('A')) + result
             n //= 26
         return result
+    
+    async def _write_warehouse_headers_only(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet, warehouse_names: List[str]):
+        """Записать только названия складов в первую строку"""
+        if not warehouse_names:
+            return
+        
+        try:
+            logger.info(f"Writing warehouse headers for {len(warehouse_names)} warehouses")
+            
+            # Записываем каждый склад в соответствующую ячейку
+            for i, warehouse in enumerate(warehouse_names):
+                # Склад начинается с колонки J (10-я), потом каждый следующий через 3 колонки
+                col_num = 10 + (i * 3)  # J=10, M=13, P=16, etc.
+                col_letter = self._col_number_to_letter(col_num)
+                cell_address = f"{col_letter}1"
+                
+                # Прямая запись в ячейку
+                worksheet.update(cell_address, warehouse)
+                logger.info(f"Wrote '{warehouse}' to {cell_address}")
+            
+            logger.info("All warehouse headers written successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to write warehouse headers: {e}", exc_info=True)
+    
+    async def _format_sheet_no_merge(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet, warehouse_names: List[str] = None):
+        """Форматирование БЕЗ merge cells"""
+        try:
+            # Получаем данные для определения количества строк и колонок
+            all_data = worksheet.get_all_values()
+            data_rows_count = len(all_data) - 2 if len(all_data) > 2 else 0
+            total_cols = len(all_data[0]) if all_data else 9
+            
+            num_warehouses = len(warehouse_names) if warehouse_names else 0
+            
+            # 1. НЕ объединяем ячейки - просто цвета и границы
+            
+            # 2. Форматируем заголовки
+            await self._format_headers_no_merge(spreadsheet, worksheet, total_cols, num_warehouses)
+            
+            # 3. Применяем границы
+            await self._apply_borders(spreadsheet, worksheet, data_rows_count, num_warehouses)
+            
+            logger.info(f"Sheet formatted successfully (warehouses: {num_warehouses}, rows: {data_rows_count}) WITHOUT MERGE")
+            
+        except Exception as e:
+            logger.error(f"Error formatting sheet: {e}", exc_info=True)
+    
+    async def _format_headers_no_merge(self, spreadsheet: gspread.Spreadsheet, worksheet: gspread.Worksheet, total_cols: int, num_warehouses: int):
+        """Форматирование заголовков без merge"""
+        try:
+            format_requests = []
+            
+            # Заголовки строк 1-2: жирный, выровненный по центру
+            format_requests.append({
+                'repeatCell': {
+                    'range': {
+                        'sheetId': worksheet.id,
+                        'startRowIndex': 0,
+                        'endRowIndex': 2,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': total_cols
+                    },
+                    'cell': {
+                        'userEnteredFormat': {
+                            'textFormat': {'bold': True},
+                            'horizontalAlignment': 'CENTER',
+                            'verticalAlignment': 'MIDDLE',
+                            'backgroundColor': {'red': 0.9, 'green': 0.9, 'blue': 0.9}
+                        }
+                    },
+                    'fields': 'userEnteredFormat(textFormat,horizontalAlignment,verticalAlignment,backgroundColor)'
+                }
+            })
+            
+            # Применяем форматирование
+            if format_requests:
+                spreadsheet.batch_update({'requests': format_requests})
+            
+        except Exception as e:
+            logger.warning(f"Failed to format headers: {e}")
 
 
 # Глобальный экземпляр сервиса
