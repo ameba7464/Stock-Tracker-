@@ -239,6 +239,28 @@ class GoogleSheetsService:
                 logger.info(f"Writing table_data: first row has {len(table_data[0])} cells")
                 logger.info(f"First row preview (cells 8-14): {table_data[0][8:15] if len(table_data[0]) > 14 else table_data[0][8:]}")
             
+            # ВАЖНО: Сначала удаляем ВСЕ форматирование и merged cells
+            # Это единственный способ полностью очистить лист
+            try:
+                # Получаем все merged ranges и размерживаем их
+                sheet_metadata = spreadsheet.fetch_sheet_metadata()
+                sheet_data = sheet_metadata.get('sheets', [{}])[0]
+                merges = sheet_data.get('merges', [])
+                
+                if merges:
+                    unmerge_requests = []
+                    for merge in merges:
+                        unmerge_requests.append({
+                            'unmergeCells': {
+                                'range': merge
+                            }
+                        })
+                    if unmerge_requests:
+                        spreadsheet.batch_update({'requests': unmerge_requests})
+                        logger.info(f"Unmerged {len(merges)} existing merged ranges")
+            except Exception as unmerge_error:
+                logger.warning(f"Could not unmerge cells: {unmerge_error}")
+            
             # Очищаем лист
             worksheet.clear()
             
