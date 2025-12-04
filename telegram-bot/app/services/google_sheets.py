@@ -579,15 +579,15 @@ class GoogleSheetsService:
             
             # Перезаписываем текст в ячейки ПОСЛЕ merge (merge очищает содержимое)
             try:
-                # Записываем группы заголовков
-                worksheet.update('A1', 'Основная информация')
-                worksheet.update('E1', 'Общие метрики')
+                # Записываем группы заголовков  
+                worksheet.update('A1', [['Основная информация']])
+                worksheet.update('E1', [['Общие метрики']])
                 
                 # Записываем названия складов по одному
                 for i, wh_name in enumerate(warehouse_names):
                     col_num = 10 + (i * 3)  # J=10, M=13, P=16, ...
                     col_letter = self._col_number_to_letter(col_num)
-                    worksheet.update(f'{col_letter}1', wh_name)
+                    worksheet.update(f'{col_letter}1', [[wh_name]])
                     if i < 3:  # Логируем первые 3
                         logger.info(f"Writing warehouse header: {wh_name} at {col_letter}1")
                 
@@ -842,7 +842,7 @@ class GoogleSheetsService:
                 col_letter = self._col_number_to_letter(col_num)
                 cell_address = f"{col_letter}1"
                 
-                # Прямая запись в ячейку
+                # Прямая запись в ячейку с правильным форматом
                 worksheet.update(cell_address, [[warehouse]])
                 logger.info(f"Wrote '{warehouse}' to {cell_address}")
             
