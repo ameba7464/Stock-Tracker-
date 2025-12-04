@@ -282,6 +282,30 @@ class GoogleSheetsService:
             check_m1 = worksheet.acell('M1').value  # Второй склад
             logger.info(f"After header rewrite: J1='{check_j1}', M1='{check_m1}'")
             
+            # ПРИНУДИТЕЛЬНО ОЧИЩАЕМ ВСЕ MERGED CELLS перед форматированием
+            try:
+                # Размерживаем все возможные ячейки в первой строке
+                for start_col in range(0, total_cols, 3):
+                    try:
+                        end_col = min(start_col + 3, total_cols)
+                        unmerge_req = {
+                            'unmergeCells': {
+                                'range': {
+                                    'sheetId': worksheet.id,
+                                    'startRowIndex': 0,
+                                    'endRowIndex': 1,
+                                    'startColumnIndex': start_col,
+                                    'endColumnIndex': end_col
+                                }
+                            }
+                        }
+                        spreadsheet.batch_update({'requests': [unmerge_req]})
+                    except:
+                        pass  # Игнорируем ошибки если нечего размерживать
+                logger.info("Force unmerged all cells in header row")
+            except Exception as unmerge_error:
+                logger.debug(f"Force unmerge failed (ok): {unmerge_error}")
+            
             # Записываем названия складов ОТДЕЛЬНО (без merge)
             await self._write_warehouse_headers_only(spreadsheet, worksheet, warehouse_names)
             
