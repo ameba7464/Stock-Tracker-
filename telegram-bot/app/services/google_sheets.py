@@ -841,7 +841,7 @@ class GoogleSheetsService:
                 cell_address = f"{col_letter}1"
                 
                 # Прямая запись в ячейку
-                worksheet.update(cell_address, warehouse)
+                worksheet.update(cell_address, [[warehouse]])
                 logger.info(f"Wrote '{warehouse}' to {cell_address}")
             
             logger.info("All warehouse headers written successfully")
@@ -865,7 +865,7 @@ class GoogleSheetsService:
             await self._format_headers_no_merge(spreadsheet, worksheet, total_cols, num_warehouses)
             
             # 3. Применяем границы
-            await self._apply_borders(spreadsheet, worksheet, data_rows_count, num_warehouses)
+            await self._apply_borders(spreadsheet, worksheet, data_rows_count)
             
             logger.info(f"Sheet formatted successfully (warehouses: {num_warehouses}, rows: {data_rows_count}) WITHOUT MERGE")
             
