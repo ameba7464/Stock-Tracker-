@@ -3,12 +3,17 @@ from typing import Optional, List, Dict, Any
 from pathlib import Path
 import json
 import os
+import time
+import asyncio
+from functools import wraps
 
 from app.utils.logger import logger
 from app.config import settings
 
 try:
     import gspread
+    from gspread.http_client import BackOffHTTPClient
+    from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound, GSpreadException
     from google.oauth2.service_account import Credentials as ServiceAccountCredentials
     from google.oauth2.credentials import Credentials as OAuthCredentials
     from google.auth.transport.requests import Request
@@ -16,6 +21,53 @@ try:
 except ImportError:
     GOOGLE_AVAILABLE = False
     logger.warning("Google API libraries not installed. Install: pip install gspread google-auth")
+
+
+def retry_on_api_error(max_retries: int = 3, backoff_factor: float = 1.5):
+    """
+    Decorator для повтора операций при сетевых ошибках/rate limit.
+    
+    Args:
+        max_retries: Максимальное количество попыток
+        backoff_factor: Множитель для exponential backoff
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            last_exception = None
+            
+            for attempt in range(max_retries):
+                try:
+                    return await func(*args, **kwargs)
+                    
+                except (APIError, Exception) as e:
+                    last_exception = e
+                    
+                    # Проверяем, стоит ли повторять
+                    should_retry = False
+                    
+                    if hasattr(e, 'response') and e.response:
+                        status_code = e.response.status_code
+                        # Retry для 429 (rate limit), 500-599 (server errors)
+                        should_retry = status_code == 429 or 500 <= status_code < 600
+                    elif "429" in str(e) or "quota" in str(e).lower():
+                        # Retry для rate limit в тексте ошибки
+                        should_retry = True
+                    
+                    if should_retry and attempt < max_retries - 1:
+                        wait_time = backoff_factor ** attempt
+                        logger.warning(
+                            f"API error on attempt {attempt + 1}/{max_retries}: {e}. "
+                            f"Retrying in {wait_time:.1f}s..."
+                        )
+                        await asyncio.sleep(wait_time)
+                    else:
+                        break
+            
+            raise last_exception
+        
+        return wrapper
+    return decorator
 
 
 class GoogleSheetsService:
@@ -59,10 +111,13 @@ class GoogleSheetsService:
                 scopes=self.SA_SCOPES
             )
             
-            # Создаем клиент gspread для Service Account
-            self.client = gspread.authorize(sa_credentials)
+            # Создаем клиент gspread для Service Account с BackOffHTTPClient
+            self.client = gspread.authorize(
+                sa_credentials,
+                http_client=BackOffHTTPClient
+            )
             
-            logger.info("Google Sheets service initialized successfully (Service Account)")
+            logger.info("Google Sheets service initialized successfully (Service Account with BackOffHTTPClient)")
             
             # 2. Инициализация OAuth (для создания файлов)
             self._initialize_oauth_client()
@@ -95,10 +150,13 @@ class GoogleSheetsService:
                     token.write(oauth_creds.to_json())
                 logger.info("OAuth token refreshed and saved")
             
-            # Создаем OAuth клиент
-            self.oauth_client = gspread.authorize(oauth_creds)
+            # Создаем OAuth клиент с BackOffHTTPClient
+            self.oauth_client = gspread.authorize(
+                oauth_creds,
+                http_client=BackOffHTTPClient
+            )
             
-            logger.info("OAuth client initialized successfully")
+            logger.info("OAuth client initialized successfully with BackOffHTTPClient")
             
         except Exception as e:
             logger.warning(f"Could not initialize OAuth client: {e}")
@@ -190,18 +248,416 @@ class GoogleSheetsService:
             
             return sheet_id
             
-        except gspread.exceptions.APIError as e:
-            logger.error(f"API error creating sheet: {e}")
-            logger.error("\n⚠️ ВОЗМОЖНЫЕ ПРИЧИНЫ:\n"
-                        "1. OAuth токен истёк - запустите get_oauth_token.py\n"
-                        "2. Google Sheets API не включен\n"
-                        "3. Google Drive API не включен\n"
-                        "4. Нет прав на создание файлов\n"
-                        "\nПроверьте: https://console.cloud.google.com/apis/dashboard")
+        except APIError as e:
+            status_code = e.response.status_code if e.response else None
+            
+            if status_code == 403:
+                logger.error("Permission denied: Check OAuth token and API access")
+                logger.error("1. Run get_oauth_token.py\n"
+                           "2. Check Google Sheets API enabled\n"
+                           "3. Check Google Drive API enabled")
+            elif status_code == 429:
+                logger.error("Rate limit exceeded")
+            elif status_code == 404:
+                logger.error(f"Folder not found: {settings.google_drive_folder_id}")
+            else:
+                logger.error(f"Google Sheets API error: {status_code} - {e}")
+            
+            return None
+        except SpreadsheetNotFound as e:
+            logger.error(f"Spreadsheet not found: {e}")
             return None
         except Exception as e:
             logger.error(f"Error creating sheet: {e}", exc_info=True)
             return None
+    
+    # ===== BATCH UPDATE HELPER METHODS =====
+    
+    def _build_unmerge_request(self, sheet_id: int, total_cols: int) -> dict:
+        """Построить request для размержирования ячеек строки 1"""
+        return {
+            'unmergeCells': {
+                'range': {
+                    'sheetId': sheet_id,
+                    'startRowIndex': 0,
+                    'endRowIndex': 1,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': total_cols
+                }
+            }
+        }
+    
+    def _build_clear_request(self, sheet_id: int, rows: int, cols: int) -> dict:
+        """Построить request для очистки содержимого"""
+        return {
+            'updateCells': {
+                'range': {
+                    'sheetId': sheet_id,
+                    'startRowIndex': 0,
+                    'endRowIndex': rows,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': cols
+                },
+                'fields': 'userEnteredValue,userEnteredFormat'
+            }
+        }
+    
+    def _build_merge_requests(self, sheet_id: int, num_warehouses: int) -> List[dict]:
+        """
+        Построить requests для объединения ячеек заголовков.
+        Оптимизировано: используем минимальное количество requests.
+        """
+        requests = []
+        
+        # Основная информация (A1:D1)
+        requests.append({
+            'mergeCells': {
+                'range': {
+                    'sheetId': sheet_id,
+                    'startRowIndex': 0,
+                    'endRowIndex': 1,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': 4
+                },
+                'mergeType': 'MERGE_ALL'
+            }
+        })
+        
+        # Общие метрики (E1:I1)
+        requests.append({
+            'mergeCells': {
+                'range': {
+                    'sheetId': sheet_id,
+                    'startRowIndex': 0,
+                    'endRowIndex': 1,
+                    'startColumnIndex': 4,
+                    'endColumnIndex': 9
+                },
+                'mergeType': 'MERGE_ALL'
+            }
+        })
+        
+        # Склады (по 3 колонки каждый) - все в одном batch
+        if num_warehouses > 0:
+            merge_ranges = []
+            for i in range(num_warehouses):
+                start_col = 9 + (i * 3)
+                end_col = start_col + 3
+                merge_ranges.append({
+                    'sheetId': sheet_id,
+                    'startRowIndex': 0,
+                    'endRowIndex': 1,
+                    'startColumnIndex': start_col,
+                    'endColumnIndex': end_col
+                })
+            
+            # Один request для всех складов
+            for merge_range in merge_ranges:
+                requests.append({
+                    'mergeCells': {
+                        'range': merge_range,
+                        'mergeType': 'MERGE_ALL'
+                    }
+                })
+        
+        logger.debug(f"Created {len(requests)} merge requests for {num_warehouses} warehouses")
+        return requests
+    
+    def _build_data_update_request(
+        self, 
+        sheet_id: int, 
+        header_row1: List[str],
+        header_row2: List[str], 
+        data_rows: List[List]
+    ) -> dict:
+        """
+        Построить request для записи всех данных (заголовки + данные).
+        
+        Использует 'userEnteredValue' вместо 'values' для правильной типизации:
+        - Числа (int, float) → numberValue - обрабатываются как числа для формул
+        - Строки → stringValue - сохраняются как текст
+        - Пустые значения → {} - пустая ячейка
+        
+        Это эквивалентно valueInputOption='USER_ENTERED' в v4 API.
+        """
+        all_rows = [header_row1, header_row2] + data_rows
+        
+        return {
+            'updateCells': {
+                'range': {
+                    'sheetId': sheet_id,
+                    'startRowIndex': 0,
+                    'endRowIndex': len(all_rows),
+                    'startColumnIndex': 0,
+                    'endColumnIndex': len(header_row2)
+                },
+                'rows': [
+                    {
+                        'values': [
+                            {
+                                'userEnteredValue': (
+                                    {'numberValue': cell} if isinstance(cell, (int, float)) and cell != '-'
+                                    else {'stringValue': str(cell)} if cell not in ('', '-', None)
+                                    else {}
+                                )
+                            }
+                            for cell in row
+                        ]
+                    }
+                    for row in all_rows
+                ],
+                'fields': 'userEnteredValue'
+            }
+        }
+    
+    def _build_format_requests(
+        self, 
+        sheet_id: int, 
+        data_rows_count: int, 
+        total_cols: int
+    ) -> List[dict]:
+        """Построить requests для форматирования"""
+        requests = []
+        
+        # Заголовки (строки 1-2): синий фон, белый текст, жирный, центр
+        requests.append({
+            'repeatCell': {
+                'range': {
+                    'sheetId': sheet_id,
+                    'startRowIndex': 0,
+                    'endRowIndex': 2,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': total_cols
+                },
+                'cell': {
+                    'userEnteredFormat': {
+                        'backgroundColor': {'red': 0.4, 'green': 0.49, 'blue': 0.92},
+                        'textFormat': {
+                            'bold': True,
+                            'fontSize': 10,
+                            'foregroundColor': {'red': 1.0, 'green': 1.0, 'blue': 1.0}
+                        },
+                        'horizontalAlignment': 'CENTER',
+                        'verticalAlignment': 'MIDDLE',
+                        'wrapStrategy': 'WRAP'
+                    }
+                },
+                'fields': 'userEnteredFormat(backgroundColor,textFormat,horizontalAlignment,verticalAlignment,wrapStrategy)'
+            }
+        })
+        
+        # Данные: первые 4 колонки - слева
+        if data_rows_count > 0:
+            requests.append({
+                'repeatCell': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'startRowIndex': 2,
+                        'endRowIndex': data_rows_count + 2,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': 4
+                    },
+                    'cell': {
+                        'userEnteredFormat': {
+                            'horizontalAlignment': 'LEFT',
+                            'verticalAlignment': 'MIDDLE'
+                        }
+                    },
+                    'fields': 'userEnteredFormat(horizontalAlignment,verticalAlignment)'
+                }
+            })
+            
+            # Остальные колонки - по центру
+            requests.append({
+                'repeatCell': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'startRowIndex': 2,
+                        'endRowIndex': data_rows_count + 2,
+                        'startColumnIndex': 4,
+                        'endColumnIndex': total_cols
+                    },
+                    'cell': {
+                        'userEnteredFormat': {
+                            'horizontalAlignment': 'CENTER',
+                            'verticalAlignment': 'MIDDLE'
+                        }
+                    },
+                    'fields': 'userEnteredFormat(horizontalAlignment,verticalAlignment)'
+                }
+            })
+        
+        return requests
+    
+    def _build_border_requests(
+        self, 
+        sheet_id: int, 
+        data_rows_count: int, 
+        total_cols: int, 
+        num_warehouses: int
+    ) -> List[dict]:
+        """Построить requests для границ"""
+        requests = []
+        
+        # Обычные границы для всех ячеек
+        if data_rows_count > 0:
+            requests.append({
+                'updateBorders': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'startRowIndex': 1,
+                        'endRowIndex': data_rows_count + 2,
+                        'startColumnIndex': 0,
+                        'endColumnIndex': total_cols
+                    },
+                    'top': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                    'bottom': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                    'left': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                    'right': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                    'innerHorizontal': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}},
+                    'innerVertical': {'style': 'SOLID', 'width': 1, 'color': {'red': 0.8, 'green': 0.8, 'blue': 0.8}}
+                }
+            })
+        
+        # Толстая граница после заголовков
+        requests.append({
+            'updateBorders': {
+                'range': {
+                    'sheetId': sheet_id,
+                    'startRowIndex': 1,
+                    'endRowIndex': 2,
+                    'startColumnIndex': 0,
+                    'endColumnIndex': total_cols
+                },
+                'bottom': {'style': 'SOLID_THICK', 'width': 3, 'color': {'red': 0.2, 'green': 0.2, 'blue': 0.2}}
+            }
+        })
+        
+        # Толстые вертикальные границы между секциями
+        requests.append({
+            'updateBorders': {
+                'range': {
+                    'sheetId': sheet_id,
+                    'startRowIndex': 0,
+                    'endRowIndex': data_rows_count + 2,
+                    'startColumnIndex': 3,
+                    'endColumnIndex': 4
+                },
+                'right': {'style': 'SOLID_THICK', 'width': 3, 'color': {'red': 0.2, 'green': 0.2, 'blue': 0.2}}
+            }
+        })
+        
+        requests.append({
+            'updateBorders': {
+                'range': {
+                    'sheetId': sheet_id,
+                    'startRowIndex': 0,
+                    'endRowIndex': data_rows_count + 2,
+                    'startColumnIndex': 8,
+                    'endColumnIndex': 9
+                },
+                'right': {'style': 'SOLID_THICK', 'width': 3, 'color': {'red': 0.2, 'green': 0.2, 'blue': 0.2}}
+            }
+        })
+        
+        # Между складами
+        for i in range(num_warehouses - 1):
+            col_index = 9 + (i * 3) + 2
+            requests.append({
+                'updateBorders': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'startRowIndex': 0,
+                        'endRowIndex': data_rows_count + 2,
+                        'startColumnIndex': col_index,
+                        'endColumnIndex': col_index + 1
+                    },
+                    'right': {'style': 'SOLID_THICK', 'width': 3, 'color': {'red': 0.2, 'green': 0.2, 'blue': 0.2}}
+                }
+            })
+        
+        return requests
+    
+    def _build_dimension_requests(self, sheet_id: int, total_cols: int) -> List[dict]:
+        """Построить requests для установки размеров колонок и строк"""
+        requests = []
+        
+        # Высота строк заголовков
+        requests.append({
+            'updateDimensionProperties': {
+                'range': {
+                    'sheetId': sheet_id,
+                    'dimension': 'ROWS',
+                    'startIndex': 0,
+                    'endIndex': 1
+                },
+                'properties': {'pixelSize': 35},
+                'fields': 'pixelSize'
+            }
+        })
+        
+        requests.append({
+            'updateDimensionProperties': {
+                'range': {
+                    'sheetId': sheet_id,
+                    'dimension': 'ROWS',
+                    'startIndex': 1,
+                    'endIndex': 2
+                },
+                'properties': {'pixelSize': 40},
+                'fields': 'pixelSize'
+            }
+        })
+        
+        # Ширина колонок (первые 4)
+        col_widths = [150, 200, 180, 150]
+        for i, width in enumerate(col_widths):
+            requests.append({
+                'updateDimensionProperties': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'dimension': 'COLUMNS',
+                        'startIndex': i,
+                        'endIndex': i + 1
+                    },
+                    'properties': {'pixelSize': width},
+                    'fields': 'pixelSize'
+                }
+            })
+        
+        # Метрики - 120px
+        for i in range(4, 9):
+            requests.append({
+                'updateDimensionProperties': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'dimension': 'COLUMNS',
+                        'startIndex': i,
+                        'endIndex': i + 1
+                    },
+                    'properties': {'pixelSize': 120},
+                    'fields': 'pixelSize'
+                }
+            })
+        
+        # Колонки складов - 90px
+        for i in range(9, total_cols):
+            requests.append({
+                'updateDimensionProperties': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'dimension': 'COLUMNS',
+                        'startIndex': i,
+                        'endIndex': i + 1
+                    },
+                    'properties': {'pixelSize': 90},
+                    'fields': 'pixelSize'
+                }
+            })
+        
+        return requests
+    
+    # ===== END BATCH UPDATE HELPER METHODS =====
     
     async def update_sheet(
         self,
@@ -209,7 +665,8 @@ class GoogleSheetsService:
         data: List[Any]
     ) -> bool:
         """
-        Обновление существующей таблицы.
+        Обновление существующей таблицы - ОПТИМИЗИРОВАННАЯ ВЕРСИЯ с batch_update.
+        ВСЕ операции выполняются в ОДНОМ API вызове.
         
         Args:
             sheet_id: ID таблицы
@@ -223,85 +680,203 @@ class GoogleSheetsService:
             return False
         
         try:
+            import time
+            start_time = time.time()
+            
             # Открываем таблицу
             spreadsheet = self.client.open_by_key(sheet_id)
             
-            # Переименовываем первый лист в "Stock Tracker" если нужно
+            # Проверяем права доступа перед операциями
+            await self._check_spreadsheet_permissions(spreadsheet)
+            
             worksheet = spreadsheet.sheet1
+            
             if worksheet.title != "Stock Tracker":
                 worksheet.update_title("Stock Tracker")
             
-            # Преобразуем данные в формат для таблицы
+            # Подготовка данных (без API вызовов)
             table_data, warehouse_names = self._prepare_table_data(data)
             
-            # DEBUG: Логируем что записываем
-            if table_data and len(table_data) > 0:
-                logger.info(f"Writing table_data: first row has {len(table_data[0])} cells")
-                logger.info(f"First row preview (cells 8-14): {table_data[0][8:15] if len(table_data[0]) > 14 else table_data[0][8:]}")
+            if not table_data or len(table_data) < 2:
+                logger.warning("No data to write")
+                return False
             
-            # ВАЖНО: Сначала удаляем ВСЕ форматирование и merged cells
-            # Это единственный способ полностью очистить лист
-            try:
-                # Получаем все merged ranges и размерживаем их
-                sheet_metadata = spreadsheet.fetch_sheet_metadata()
-                sheet_data = sheet_metadata.get('sheets', [{}])[0]
-                merges = sheet_data.get('merges', [])
-                
-                if merges:
-                    unmerge_requests = []
-                    for merge in merges:
-                        unmerge_requests.append({
-                            'unmergeCells': {
-                                'range': merge
-                            }
-                        })
-                    if unmerge_requests:
-                        spreadsheet.batch_update({'requests': unmerge_requests})
-                        logger.info(f"Unmerged {len(merges)} existing merged ranges")
-            except Exception as unmerge_error:
-                logger.warning(f"Could not unmerge cells: {unmerge_error}")
+            header_row1 = table_data[0]
+            header_row2 = table_data[1]
+            data_rows = table_data[2:]
             
-            # Очищаем лист
-            worksheet.clear()
+            num_rows_needed = len(table_data)
+            num_cols_needed = len(table_data[0])
+            num_warehouses = len(warehouse_names)
             
-            # Расширяем лист если нужно больше колонок
-            num_cols_needed = len(table_data[0]) if table_data else 26
-            num_rows_needed = len(table_data) if table_data else 100
+            logger.info(f"Preparing batch update: {len(data_rows)} data rows, {num_warehouses} warehouses")
             
-            # Получаем текущий размер листа
-            current_cols = worksheet.col_count
+            # Расширяем лист если нужно (отдельный вызов, но обязательный)
             current_rows = worksheet.row_count
+            current_cols = worksheet.col_count
             
-            logger.info(f"Sheet size: {current_rows}x{current_cols}, need: {num_rows_needed}x{num_cols_needed}")
-            
-            # Расширяем если нужно
             if current_cols < num_cols_needed or current_rows < num_rows_needed:
                 new_cols = max(current_cols, num_cols_needed)
-                new_rows = max(current_rows, num_rows_needed)
+                new_rows = max(current_rows, num_rows_needed + 10)
                 worksheet.resize(rows=new_rows, cols=new_cols)
                 logger.info(f"Resized sheet to {new_rows}x{new_cols}")
             
-            # Записываем данные
-            # Используем update с явным диапазоном для всей таблицы
-            end_col_letter = self._col_number_to_letter(num_cols_needed)
-            data_range = f'A1:{end_col_letter}{num_rows_needed}'
-            logger.info(f"Writing data to range: {data_range}")
+            # === ЕДИНСТВЕННЫЙ BATCH_UPDATE ДЛЯ ВСЕХ ОПЕРАЦИЙ ===
+            all_requests = []
             
-            worksheet.update(data_range, table_data, value_input_option='USER_ENTERED')
-            logger.info("Table data written successfully")
+            # 1. Размержирование существующих ячеек строки 1
+            all_requests.append(self._build_unmerge_request(worksheet.id, num_cols_needed))
             
-            # Форматируем таблицу (названия складов теперь во второй строке!)
-            await self._format_sheet(spreadsheet, worksheet, warehouse_names)
+            # 2. Очистка (не используем worksheet.clear())
+            all_requests.append(self._build_clear_request(
+                worksheet.id, 
+                current_rows, 
+                current_cols
+            ))
             
-            logger.info(f"Sheet {sheet_id} updated successfully")
+            # 3. Запись данных (заголовки + данные)
+            all_requests.append(self._build_data_update_request(
+                worksheet.id,
+                header_row1,
+                header_row2,
+                data_rows
+            ))
+            
+            # 4. Объединение ячеек заголовков
+            all_requests.extend(self._build_merge_requests(worksheet.id, num_warehouses))
+            
+            # 5. Форматирование
+            all_requests.extend(self._build_format_requests(
+                worksheet.id,
+                len(data_rows),
+                num_cols_needed
+            ))
+            
+            # 6. Границы
+            all_requests.extend(self._build_border_requests(
+                worksheet.id,
+                len(data_rows),
+                num_cols_needed,
+                num_warehouses
+            ))
+            
+            # 7. Размеры колонок и строк
+            all_requests.extend(self._build_dimension_requests(worksheet.id, num_cols_needed))
+            
+            # ВЫПОЛНЯЕМ ВСЕ ОПЕРАЦИИ ОДНИМ ЗАПРОСОМ
+            prep_time = time.time() - start_time
+            logger.info(f"Executing batch update with {len(all_requests)} requests...")
+            
+            batch_start = time.time()
+            
+            # Применяем retry для критичной операции
+            @retry_on_api_error(max_retries=3)
+            async def execute_batch():
+                return spreadsheet.batch_update({'requests': all_requests})
+            
+            batch_response = await execute_batch()
+            batch_time = time.time() - batch_start
+            
+            # 8. Замораживание заголовков (отдельный метод, но быстрый)
+            freeze_start = time.time()
+            worksheet.freeze(rows=2, cols=0)
+            freeze_time = time.time() - freeze_start
+            
+            elapsed = time.time() - start_time
+            
+            logger.info(
+                f"✅ Updated in {elapsed:.2f}s | "
+                f"Prep: {prep_time:.2f}s | "
+                f"Batch: {batch_time:.2f}s | "
+                f"Freeze: {freeze_time:.2f}s | "
+                f"API calls: 3 (open/batch/freeze) | "
+                f"Requests in batch: {len(all_requests)}"
+            )
+            
             return True
             
-        except gspread.exceptions.APIError as e:
-            logger.error(f"API error updating sheet: {e}")
+        except SpreadsheetNotFound:
+            logger.error(f"Spreadsheet {sheet_id} not found")
+            return False
+        except WorksheetNotFound:
+            logger.warning("Worksheet 'Stock Tracker' not found")
+            return False
+        except APIError as e:
+            status_code = e.response.status_code if e.response else None
+            
+            if status_code == 403:
+                logger.error("Permission denied - Service Account needs access")
+            elif status_code == 429:
+                logger.error("Rate limit exceeded despite BackOffHTTPClient")
+            elif status_code and status_code >= 500:
+                logger.error(f"Google Sheets server error: {status_code}")
+            else:
+                logger.error(f"API error: {status_code} - {e}")
+            
             return False
         except Exception as e:
             logger.error(f"Error updating sheet: {e}", exc_info=True)
             return False
+    
+    async def _check_spreadsheet_permissions(self, spreadsheet: gspread.Spreadsheet) -> bool:
+        """
+        Проверить права доступа к таблице (writer/owner).
+        
+        Args:
+            spreadsheet: Spreadsheet для проверки
+            
+        Returns:
+            True если есть права на запись
+            
+        Raises:
+            Exception: Нет прав на запись
+        """
+        try:
+            # Пытаемся получить метаданные
+            _ = spreadsheet.id
+            _ = spreadsheet.title
+            
+            # Проверяем права на запись
+            try:
+                permissions = spreadsheet.list_permissions()
+                
+                # Получаем email текущего аккаунта
+                if hasattr(self.client, 'auth'):
+                    current_email = getattr(self.client.auth, 'service_account_email', None)
+                    
+                    if current_email:
+                        has_write_access = False
+                        for perm in permissions:
+                            if perm.get('emailAddress') == current_email:
+                                role = perm.get('role', '')
+                                if role in ('writer', 'owner'):
+                                    has_write_access = True
+                                    break
+                        
+                        if not has_write_access:
+                            raise Exception(
+                                f"Account {current_email} не имеет прав writer/owner на таблицу"
+                            )
+                        
+                        logger.debug(f"Permissions OK: {current_email} has {role} access")
+                        return True
+                
+                # Если не удалось получить email, считаем OK
+                logger.warning("Could not verify permissions - proceeding")
+                return True
+                
+            except AttributeError:
+                # list_permissions не доступен
+                logger.warning("list_permissions not available, skipping permission check")
+                return True
+                
+        except APIError as e:
+            if e.response.status_code == 403:
+                raise Exception(
+                    f"Нет доступа к таблице. "
+                    f"Проверьте права доступа."
+                )
+            raise
     
     def _prepare_table_data(self, products: List[Any]) -> tuple:
         """

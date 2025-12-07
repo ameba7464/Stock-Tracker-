@@ -86,7 +86,7 @@ class WildberriesAPIError(APIError):
 
 
 class SheetsAPIError(APIError):
-    """Raised when Google Sheets API calls fail."""
+    """Базовое исключение для Google Sheets API."""
     
     def __init__(self, message: str, sheet_id: Optional[str] = None,
                  range_name: Optional[str] = None,
@@ -110,6 +110,21 @@ class SheetsAPIError(APIError):
             self.details["sheet_id"] = sheet_id
         if range_name:
             self.details["range_name"] = range_name
+
+
+class SheetsRateLimitError(SheetsAPIError):
+    """Rate limit exceeded для Google Sheets API."""
+    pass
+
+
+class SheetsPermissionError(SheetsAPIError):
+    """Permission denied для Google Sheets API."""
+    pass
+
+
+class SheetsNotFoundError(SheetsAPIError):
+    """Spreadsheet or worksheet not found."""
+    pass
 
 
 class ValidationError(StockTrackerError):
