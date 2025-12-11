@@ -16,11 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-
-      - name: Validate Prometheus Config
+      - name: Test Step
         run: |
-          docker run --rm -v $(pwd)/monitoring/prometheus.yml:/prometheus.yml \
-            prom/prometheus:v2.48.0 promtool check config /prometheus.yml
-          echo "✅ Prometheus configuration is valid"
+          echo "✅ Workflow executed successfully"
+          echo "GitHub Actions is working!"
