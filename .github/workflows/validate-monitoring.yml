@@ -7,7 +7,7 @@ on:
     paths:
       - 'monitoring/**'
       - 'docker-compose.yml'
-      - '.github/workflows/deploy-monitoring.yml'
+      - '.github/workflows/validate-monitoring.yml'
   workflow_dispatch:
 
 jobs:
