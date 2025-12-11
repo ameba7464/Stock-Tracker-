@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход - Admin Panel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-color: #667eea;
+            --primary-dark: #5568d3;
+            --danger-color: #f56565;
+            --bg-primary: #f7fafc;
+            --bg-secondary: #ffffff;
+            --text-primary: #2d3748;
+            --text-secondary: #718096;
+            --border-color: #e2e8f0;
+            --shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+            --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .login-container {
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            box-shadow: var(--shadow-lg);
+            padding: 40px;
+            width: 100%;
+            max-width: 450px;
+            animation: slideIn 0.5s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logo h1 {
+            font-size: 32px;
+            color: var(--primary-color);
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .logo p {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 15px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .error-message {
+            background: #fed7d7;
+            color: #742a2a;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 20px;
+            display: none;
+            animation: shake 0.5s;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-10px); }
+            75% { transform: translateX(10px); }
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-login:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow);
+        }
+
+        .btn-login:disabled {
+            background: var(--text-secondary);
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .spinner {
+            border: 3px solid var(--border-color);
+            border-top: 3px solid var(--primary-color);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .footer p {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .footer a {
+            color: var(--primary-color);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo">
+            <h1>🛠️ Admin Panel</h1>
+            <p>Stock Tracker Management</p>
+        </div>
+
+        <div class="error-message" id="errorMessage"></div>
+
+        <form id="loginForm" onsubmit="handleLogin(event)">
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input 
+                    type="email" 
+                    id="email" 
+                    name="email" 
+                    required 
+                    placeholder="admin@example.com"
+                    autocomplete="email"
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="password">Пароль</label>
+                <input 
+                    type="password" 
+                    id="password" 
+                    name="password" 
+                    required 
+                    placeholder="••••••••"
+                    autocomplete="current-password"
+                >
+            </div>
+
+            <button type="submit" class="btn-login" id="loginBtn">
+                Войти
+            </button>
+        </form>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p style="margin-top: 10px; font-size: 14px; color: var(--text-secondary);">
+                Проверка учетных данных...
+            </p>
+        </div>
+
+        <div class="footer">
+            <p>Stock Tracker Admin Panel v2.0</p>
+            <p><a href="/docs" target="_blank">API Документация</a></p>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = '/api/v1';
+
+        // Check if already logged in
+        window.addEventListener('DOMContentLoaded', () => {
+            const token = localStorage.getItem('access_token');
+            if (token) {
+                // Verify token is still valid
+                verifyToken(token);
+            }
+        });
+
+        async function verifyToken(token) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/admin/stats`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.ok) {
+                    // Token is valid and user is admin, redirect to admin panel
+                    window.location.href = '/admin/admin.html';
+                } else {
+                    // Token invalid or user not admin, remove it
+                    localStorage.removeItem('access_token');
+                }
+            } catch (error) {
+                console.error('Token verification failed:', error);
+                localStorage.removeItem('access_token');
+            }
+        }
+
+        async function handleLogin(event) {
+            event.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const errorMessage = document.getElementById('errorMessage');
+            const loginBtn = document.getElementById('loginBtn');
+            const loading = document.getElementById('loading');
+
+            // Hide error message
+            errorMessage.classList.remove('show');
+
+            // Disable form and show loading
+            loginBtn.disabled = true;
+            loading.style.display = 'block';
+
+            try {
+                // Login request
+                const response = await fetch(`${API_BASE_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: email,
+                        password: password
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Ошибка входа');
+                }
+
+                // Store token
+                localStorage.setItem('access_token', data.access_token);
+                localStorage.setItem('refresh_token', data.refresh_token);
+
+                // Verify user is admin
+                const statsResponse = await fetch(`${API_BASE_URL}/admin/stats`, {
+                    headers: {
+                        'Authorization': `Bearer ${data.access_token}`
+                    }
+                });
+
+                if (statsResponse.ok) {
+                    // User is admin, redirect
+                    window.location.href = '/admin/admin.html';
+                } else if (statsResponse.status === 403) {
+                    // User is not admin
+                    localStorage.removeItem('access_token');
+                    localStorage.removeItem('refresh_token');
+                    throw new Error('У вас нет прав администратора');
+                } else {
+                    throw new Error('Ошибка проверки прав доступа');
+                }
+
+            } catch (error) {
+                console.error('Login failed:', error);
+                errorMessage.textContent = error.message;
+                errorMessage.classList.add('show');
+            } finally {
+                loginBtn.disabled = false;
+                loading.style.display = 'none';
+            }
+        }
+
+        // Enter key submits form
+        document.getElementById('password').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleLogin(e);
+            }
+        });
+    </script>
+</body>
+</html>

@@ -41,7 +41,7 @@ class SyncLog(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
-    tenant = relationship("Tenant", back_populates="sync_logs")
+    tenant = relationship("Tenant")
     
     # Indexes for common queries
     __table_args__ = (

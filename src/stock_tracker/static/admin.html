@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Stock Tracker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary-color: #667eea;
+            --primary-dark: #5568d3;
+            --success-color: #48bb78;
+            --danger-color: #f56565;
+            --warning-color: #ed8936;
+            --bg-primary: #f7fafc;
+            --bg-secondary: #ffffff;
+            --text-primary: #2d3748;
+            --text-secondary: #718096;
+            --border-color: #e2e8f0;
+            --shadow: 0 4px 6px rgba(0, 0, 0, 0.07);
+            --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        /* Header */
+        .header {
+            background: var(--bg-secondary);
+            padding: 20px 0;
+            box-shadow: var(--shadow);
+            margin-bottom: 30px;
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 24px;
+            color: var(--primary-color);
+            font-weight: 700;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .user-info {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        .btn-logout {
+            background: var(--danger-color);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .btn-logout:hover {
+            background: #e53e3e;
+            transform: translateY(-1px);
+        }
+
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .stat-card h3 {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 10px;
+        }
+
+        .stat-card .value {
+            font-size: 36px;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin-bottom: 8px;
+        }
+
+        .stat-card .label {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        /* Main Content */
+        .main-content {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            box-shadow: var(--shadow);
+            padding: 25px;
+        }
+
+        .content-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .content-header h2 {
+            font-size: 22px;
+            font-weight: 700;
+        }
+
+        /* Search and Filters */
+        .search-filters {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .search-box {
+            position: relative;
+            flex: 1;
+            min-width: 250px;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 10px 40px 10px 15px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+        }
+
+        .filter-select {
+            padding: 10px 15px;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+            cursor: pointer;
+            transition: border-color 0.3s;
+        }
+
+        .filter-select:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        /* Users Table */
+        .users-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .users-table thead {
+            background: var(--bg-primary);
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .users-table th {
+            padding: 15px;
+            text-align: left;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .users-table tbody tr {
+            border-bottom: 1px solid var(--border-color);
+            transition: background-color 0.2s;
+            cursor: pointer;
+        }
+
+        .users-table tbody tr:hover {
+            background: var(--bg-primary);
+        }
+
+        .users-table td {
+            padding: 18px 15px;
+            font-size: 14px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .badge-free { background: #e2e8f0; color: #4a5568; }
+        .badge-starter { background: #bee3f8; color: #2c5282; }
+        .badge-pro { background: #c6f6d5; color: #22543d; }
+        .badge-enterprise { background: #fed7d7; color: #742a2a; }
+        .badge-active { background: #c6f6d5; color: #22543d; }
+        .badge-inactive { background: #fed7d7; color: #742a2a; }
+        .badge-admin { background: #fef5e7; color: #c27803; }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 25px;
+        }
+
+        .pagination button {
+            padding: 8px 16px;
+            border: 2px solid var(--border-color);
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination .page-info {
+            padding: 0 15px;
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            animation: fadeIn 0.3s;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal.active {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 30px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: var(--shadow-lg);
+            animation: slideIn 0.3s;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateY(-50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid var(--border-color);
+        }
+
+        .modal-header h2 {
+            font-size: 24px;
+            color: var(--text-primary);
+        }
+
+        .close-modal {
+            background: none;
+            border: none;
+            font-size: 28px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            line-height: 1;
+            transition: color 0.3s;
+        }
+
+        .close-modal:hover {
+            color: var(--danger-color);
+        }
+
+        .user-details {
+            display: grid;
+            gap: 20px;
+        }
+
+        .detail-group {
+            padding: 15px;
+            background: var(--bg-primary);
+            border-radius: 8px;
+        }
+
+        .detail-group h3 {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .detail-value {
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        /* Action Buttons */
+        .action-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 25px;
+        }
+
+        .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow);
+        }
+
+        .btn-success {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #38a169;
+            transform: translateY(-2px);
+        }
+
+        .btn-danger {
+            background: var(--danger-color);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #e53e3e;
+            transform: translateY(-2px);
+        }
+
+        .btn-warning {
+            background: var(--warning-color);
+            color: white;
+        }
+
+        .btn-warning:hover {
+            background: #dd6b20;
+            transform: translateY(-2px);
+        }
+
+        /* Plan Selection Buttons */
+        .plan-buttons {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 10px;
+        }
+
+        .plan-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 15px 10px;
+            border: 2px solid var(--border-color);
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            min-height: 80px;
+        }
+
+        .plan-btn:hover {
+            border-color: var(--primary-color);
+            background: var(--bg-primary);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow);
+        }
+
+        .plan-btn.active {
+            border-color: var(--primary-color);
+            background: var(--primary-color);
+            color: white;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .plan-btn .plan-name {
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+
+        .plan-btn .plan-desc {
+            font-size: 11px;
+            opacity: 0.8;
+        }
+
+        .plan-btn.active .plan-name,
+        .plan-btn.active .plan-desc {
+            color: white;
+        }
+
+        /* Loading Spinner */
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .spinner {
+            border: 4px solid var(--border-color);
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .users-table {
+                font-size: 12px;
+            }
+
+            .users-table th,
+            .users-table td {
+                padding: 10px 8px;
+            }
+
+            .action-buttons {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <h1>🛠️ Admin Panel</h1>
+            <div class="header-actions">
+                <span class="user-info" id="adminEmail">Loading...</span>
+                <button class="btn-logout" onclick="logout()">Выйти</button>
+            </div>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Statistics -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Всего пользователей</h3>
+                <div class="value" id="totalUsers">-</div>
+                <div class="label">Зарегистрировано</div>
+            </div>
+            <div class="stat-card">
+                <h3>Активных</h3>
+                <div class="value" id="activeUsers">-</div>
+                <div class="label">Пользователей активно</div>
+            </div>
+            <div class="stat-card">
+                <h3>Админов</h3>
+                <div class="value" id="adminUsers">-</div>
+                <div class="label">С правами администратора</div>
+            </div>
+            <div class="stat-card">
+                <h3>Тенантов</h3>
+                <div class="value" id="totalTenants">-</div>
+                <div class="label">Организаций</div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="content-header">
+                <h2>Управление пользователями</h2>
+                <div class="search-filters">
+                    <div class="search-box">
+                        <input 
+                            type="text" 
+                            id="searchInput" 
+                            placeholder="Поиск по email или имени..."
+                            onkeyup="searchUsers()"
+                        >
+                        <span class="search-icon">🔍</span>
+                    </div>
+                    <select class="filter-select" id="planFilter" onchange="filterUsers()">
+                        <option value="">Все тарифы</option>
+                        <option value="free">Free</option>
+                        <option value="starter">Starter</option>
+                        <option value="pro">Pro</option>
+                        <option value="enterprise">Enterprise</option>
+                    </select>
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 14px;">
+                        <input type="checkbox" id="activeOnly" onchange="filterUsers()">
+                        Только активные
+                    </label>
+                </div>
+            </div>
+
+            <!-- Loading -->
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p style="margin-top: 15px; color: var(--text-secondary);">Загрузка данных...</p>
+            </div>
+
+            <!-- Users Table -->
+            <table class="users-table" id="usersTable">
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Имя</th>
+                        <th>Организация</th>
+                        <th>Доступ</th>
+                        <th>Статус</th>
+                        <th>Роль</th>
+                        <th>Дата регистрации</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                    <!-- Users will be loaded here -->
+                </tbody>
+            </table>
+
+            <!-- Pagination -->
+            <div class="pagination">
+                <button onclick="previousPage()" id="prevBtn">← Предыдущая</button>
+                <span class="page-info" id="pageInfo">Страница 1 из 1</span>
+                <button onclick="nextPage()" id="nextBtn">Следующая →</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Details Modal -->
+    <div class="modal" id="userModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Информация о пользователе</h2>
+                <button class="close-modal" onclick="closeModal()">&times;</button>
+            </div>
+            
+            <div class="user-details" id="userDetailsContent">
+                <!-- User details will be loaded here -->
+            </div>
+
+            <div class="action-buttons">
+                <button class="btn btn-primary" onclick="toggleAdmin()">
+                    <span id="adminToggleText">Выдать Admin</span>
+                </button>
+                <button class="btn btn-success" onclick="toggleActive()">
+                    <span id="activeToggleText">Активировать</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE_URL = '/api/v1';
+        let currentPage = 1;
+        let totalPages = 1;
+        let currentUserId = null;
+        let currentUserData = null;
+
+        // Get token from localStorage
+        function getToken() {
+            return localStorage.getItem('access_token');
+        }
+
+        // API Helper
+        async function apiRequest(endpoint, method = 'GET', body = null) {
+            const token = getToken();
+            if (!token) {
+                window.location.href = '/admin/login.html';
+                return;
+            }
+
+            const options = {
+                method,
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            };
+
+            if (body) {
+                options.body = JSON.stringify(body);
+            }
+
+            const response = await fetch(`${API_BASE_URL}${endpoint}`, options);
+            
+            if (response.status === 401) {
+                localStorage.removeItem('access_token');
+                window.location.href = '/admin/login.html';
+                return;
+            }
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Request failed');
+            }
+
+            return response.json();
+        }
+
+        // Load statistics
+        async function loadStats() {
+            try {
+                const stats = await apiRequest('/admin/stats');
+                document.getElementById('totalUsers').textContent = stats.total_users;
+                document.getElementById('activeUsers').textContent = stats.active_users;
+                document.getElementById('adminUsers').textContent = stats.admin_users;
+                document.getElementById('totalTenants').textContent = stats.total_tenants;
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+
+        // Load users
+        async function loadUsers(page = 1) {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('usersTable').style.display = 'none';
+
+            try {
+                const search = document.getElementById('searchInput').value;
+                const planFilter = document.getElementById('planFilter').value;
+                const activeOnly = document.getElementById('activeOnly').checked;
+
+                let endpoint = `/admin/users?page=${page}&page_size=20`;
+                if (search) endpoint += `&search=${encodeURIComponent(search)}`;
+                if (planFilter) endpoint += `&plan_filter=${planFilter}`;
+                if (activeOnly) endpoint += `&active_only=true`;
+
+                const data = await apiRequest(endpoint);
+                
+                currentPage = data.page;
+                totalPages = data.total_pages;
+                
+                renderUsers(data.users);
+                updatePagination();
+                
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('usersTable').style.display = 'table';
+            } catch (error) {
+                console.error('Failed to load users:', error);
+                alert('Не удалось загрузить пользователей: ' + error.message);
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        // Render users table
+        function renderUsers(users) {
+            const tbody = document.getElementById('usersTableBody');
+            tbody.innerHTML = '';
+
+            users.forEach(user => {
+                const row = document.createElement('tr');
+                row.onclick = () => openUserModal(user.id);
+                
+                const accessBadgeClass = user.has_access ? 'badge-active' : 'badge-inactive';
+                const accessText = user.has_access ? '✓ Есть доступ' : '✗ Нет доступа';
+                const statusBadgeClass = user.is_active ? 'badge-active' : 'badge-inactive';
+                const roleBadge = user.is_admin ? '<span class="badge badge-admin">Admin</span>' : '';
+                
+                const registrationDate = new Date(user.created_at).toLocaleDateString('ru-RU');
+                
+                row.innerHTML = `
+                    <td>${user.email}</td>
+                    <td>${user.full_name || '-'}</td>
+                    <td>${user.tenant_name}</td>
+                    <td><span class="badge ${accessBadgeClass}">${accessText}</span></td>
+                    <td><span class="badge ${statusBadgeClass}">${user.is_active ? 'Активен' : 'Неактивен'}</span></td>
+                    <td>${roleBadge || 'User'}</td>
+                    <td>${registrationDate}</td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+        }
+
+        // Pagination
+        function updatePagination() {
+            document.getElementById('pageInfo').textContent = `Страница ${currentPage} из ${totalPages}`;
+            document.getElementById('prevBtn').disabled = currentPage <= 1;
+            document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+        }
+
+        function previousPage() {
+            if (currentPage > 1) {
+                loadUsers(currentPage - 1);
+            }
+        }
+
+        function nextPage() {
+            if (currentPage < totalPages) {
+                loadUsers(currentPage + 1);
+            }
+        }
+
+        // Search and filter
+        let searchTimeout;
+        function searchUsers() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                loadUsers(1);
+            }, 500);
+        }
+
+        function filterUsers() {
+            loadUsers(1);
+        }
+
+        // Open user details modal
+        async function openUserModal(userId) {
+            try {
+                currentUserId = userId;
+                const user = await apiRequest(`/admin/users/${userId}`);
+                currentUserData = user;
+                
+                renderUserDetails(user);
+                document.getElementById('userModal').classList.add('active');
+            } catch (error) {
+                console.error('Failed to load user details:', error);
+                alert('Не удалось загрузить данные пользователя');
+            }
+        }
+
+        // Render user details
+        function renderUserDetails(user) {
+            const content = document.getElementById('userDetailsContent');
+            
+            const lastLogin = user.last_login_at 
+                ? new Date(user.last_login_at).toLocaleString('ru-RU')
+                : 'Никогда';
+            
+            const createdAt = new Date(user.created_at).toLocaleString('ru-RU');
+            
+            content.innerHTML = `
+                <div class="detail-group">
+                    <h3>👤 Информация о пользователе</h3>
+                    <div class="detail-row">
+                        <span class="detail-label">Email:</span>
+                        <span class="detail-value">${user.email}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Имя:</span>
+                        <span class="detail-value">${user.full_name || '-'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Роль:</span>
+                        <span class="detail-value">${user.is_admin ? 'Admin' : user.role}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Статус:</span>
+                        <span class="detail-value">${user.is_active ? '✅ Активен' : '❌ Неактивен'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Email подтвержден:</span>
+                        <span class="detail-value">${user.is_verified ? '✅ Да' : '❌ Нет'}</span>
+                    </div>
+                </div>
+
+                <div class="detail-group">
+                    <h3>🏢 Организация</h3>
+                    <div class="detail-row">
+                        <span class="detail-label">Название:</span>
+                        <span class="detail-value">${user.tenant_name}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Маркетплейс:</span>
+                        <span class="detail-value">${user.marketplace_type}</span>
+                    </div>
+                </div>
+
+                <div class="detail-group">
+                    <h3>💳 Подписка</h3>
+                    <div class="detail-row">
+                        <span class="detail-label">Доступ к таблице:</span>
+                        <span class="detail-value" style="font-weight: bold; color: ${user.has_access ? '#28a745' : '#dc3545'};">
+                            ${user.has_access ? '✓ Есть доступ' : '✗ Нет доступа'}
+                        </span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Статус оплаты:</span>
+                        <span class="detail-value">${user.subscription_status === 'paid' ? '💰 Оплачено' : '⏳ Не оплачено'}</span>
+                    </div>
+                    <div style="margin-top: 20px; padding: 15px; background: var(--bg-primary); border-radius: 8px;">
+                        <div style="margin-bottom: 15px; font-weight: 600; color: var(--text-primary);">Управление доступом:</div>
+                        <div class="plan-buttons">
+                            ${user.has_access ? `
+                                <button class="plan-btn active" onclick="toggleAccess(false)" data-access="granted">
+                                    <span class="plan-name">✅ Доступ открыт</span>
+                                    <span class="plan-desc">Статус: ${user.subscription_status}</span>
+                                </button>
+                                <button class="plan-btn" onclick="toggleAccess(false)" data-access="revoke" style="background: #dc3545; border-color: #dc3545;">
+                                    <span class="plan-name">❌ Забрать доступ</span>
+                                    <span class="plan-desc">Закрыть таблицу</span>
+                                </button>
+                            ` : `
+                                <button class="plan-btn" onclick="toggleAccess(true)" data-access="grant" style="background: #28a745; border-color: #28a745;">
+                                    <span class="plan-name">✓ Дать доступ</span>
+                                    <span class="plan-desc">Открыть таблицу</span>
+                                </button>
+                                <button class="plan-btn active" onclick="toggleAccess(true)" data-access="denied">
+                                    <span class="plan-name">🔒 Доступ закрыт</span>
+                                    <span class="plan-desc">Статус: ${user.subscription_status}</span>
+                                </button>
+                            `}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="detail-group">
+                    <h3>📅 Активность</h3>
+                    <div class="detail-row">
+                        <span class="detail-label">Дата регистрации:</span>
+                        <span class="detail-value">${createdAt}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="detail-label">Последний вход:</span>
+                        <span class="detail-value">${lastLogin}</span>
+                    </div>
+                </div>
+            `;
+
+            // Update button texts
+            document.getElementById('adminToggleText').textContent = 
+                user.is_admin ? 'Забрать Admin' : 'Выдать Admin';
+            document.getElementById('activeToggleText').textContent = 
+                user.is_active ? 'Деактивировать' : 'Активировать';
+        }
+
+        // Close modal
+        function closeModal() {
+            document.getElementById('userModal').classList.remove('active');
+            currentUserId = null;
+            currentUserData = null;
+        }
+
+        // Toggle admin status
+        async function toggleAdmin() {
+            if (!currentUserId) return;
+            
+            const newAdminStatus = !currentUserData.is_admin;
+            const confirmText = newAdminStatus 
+                ? 'Выдать этому пользователю права администратора?'
+                : 'Забрать права администратора у этого пользователя?';
+            
+            if (!confirm(confirmText)) return;
+
+            try {
+                await apiRequest(`/admin/users/${currentUserId}/access`, 'PATCH', {
+                    is_admin: newAdminStatus
+                });
+                
+                alert('Права успешно обновлены!');
+                closeModal();
+                loadUsers(currentPage);
+                loadStats();
+            } catch (error) {
+                alert('Ошибка: ' + error.message);
+            }
+        }
+
+        // Toggle active status
+        async function toggleActive() {
+            if (!currentUserId) return;
+            
+            const newActiveStatus = !currentUserData.is_active;
+            const confirmText = newActiveStatus 
+                ? 'Активировать этого пользователя?'
+                : 'Деактивировать этого пользователя?';
+            
+            if (!confirm(confirmText)) return;
+
+            try {
+                await apiRequest(`/admin/users/${currentUserId}/access`, 'PATCH', {
+                    is_active: newActiveStatus
+                });
+                
+                alert('Статус успешно обновлен!');
+                closeModal();
+                loadUsers(currentPage);
+                loadStats();
+            } catch (error) {
+                alert('Ошибка: ' + error.message);
+            }
+        }
+
+        // Change plan
+        async function toggleAccess(grantAccess) {
+            if (!currentUserId) return;
+            
+            const action = grantAccess ? 'открыть' : 'закрыть';
+            const actionPast = grantAccess ? 'открыт' : 'закрыт';
+            
+            if (!confirm(`${action.charAt(0).toUpperCase() + action.slice(1)} доступ пользователю к таблице?`)) {
+                return;
+            }
+
+            try {
+                await apiRequest(`/admin/users/${currentUserId}/access`, 'PATCH', {
+                    has_access: grantAccess
+                });
+                
+                alert(`Доступ успешно ${actionPast}!`);
+                
+                // Reload user details
+                const updatedUser = await apiRequest(`/admin/users/${currentUserId}`);
+                currentUserData = updatedUser;
+                renderUserDetails(updatedUser);
+                
+                loadUsers(currentPage);
+                loadStats();
+            } catch (error) {
+                alert('Ошибка при изменении тарифа: ' + error.message);
+            }
+        }
+
+        // Deactivate user (kept for legacy, not used in UI anymore)
+        async function deactivateUser() {
+            if (!currentUserId) return;
+            
+            if (!confirm('Вы уверены, что хотите деактивировать этого пользователя?')) return;
+
+            try {
+                await apiRequest(`/admin/users/${currentUserId}`, 'DELETE');
+                alert('Пользователь деактивирован!');
+                closeModal();
+                loadUsers(currentPage);
+                loadStats();
+            } catch (error) {
+                alert('Ошибка: ' + error.message);
+            }
+        }
+
+        // Logout
+        function logout() {
+            if (confirm('Вы действительно хотите выйти?')) {
+                localStorage.removeItem('access_token');
+                window.location.href = '/admin/login.html';
+            }
+        }
+
+        // Initialize
+        window.addEventListener('DOMContentLoaded', () => {
+            // Check if user is logged in
+            if (!getToken()) {
+                window.location.href = '/admin/login.html';
+                return;
+            }
+
+            // Load initial data
+            loadStats();
+            loadUsers();
+        });
+
+        // Close modal on outside click
+        document.getElementById('userModal').addEventListener('click', (e) => {
+            if (e.target.id === 'userModal') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>

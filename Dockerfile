@@ -73,8 +73,10 @@ FROM dependencies as production
 # Copy application code
 COPY --chown=appuser:appuser . .
 
-# Create logs directory
-RUN mkdir -p /app/logs && chown appuser:appuser /app/logs
+# Create logs directory and celerybeat-schedule directory with proper permissions
+RUN mkdir -p /app/logs /app/tmp && \
+    chown -R appuser:appuser /app/logs /app/tmp && \
+    chmod -R 755 /app/tmp
 
 # Switch to app user
 USER appuser

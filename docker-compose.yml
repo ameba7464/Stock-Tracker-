@@ -129,7 +129,7 @@ services:
       dockerfile: Dockerfile
       target: production
     container_name: stock-tracker-beat
-    command: celery -A stock_tracker.workers.celery_app beat --loglevel=info
+    command: sh -c "mkdir -p /tmp/celerybeat && celery -A stock_tracker.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat/schedule"
     environment:
       # Database
       DATABASE_URL: postgresql://${POSTGRES_USER:-stock_tracker}:${POSTGRES_PASSWORD:-stock_tracker_password}@postgres:5432/${POSTGRES_DB:-stock_tracker}
@@ -166,6 +166,30 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
     ports:
       - "5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5555/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - stock-tracker-network
+    restart: unless-stopped
+
+  # Celery Exporter (Prometheus Metrics for Celery)
+  celery-exporter:
+    image: danihodovic/celery-exporter:latest
+    container_name: stock-tracker-celery-exporter
+    command: --broker-url=redis://redis:6379/0
+    environment:
+      CE_BROKER_URL: redis://redis:6379/0
+    ports:
+      - "9808:9808"
     depends_on:
       redis:
         condition: service_healthy
@@ -405,6 +429,8 @@ volumes:
   grafana_data:
     driver: local
   backup_data:
+    driver: local
+  celerybeat_schedule:
     driver: local
 
 networks:

@@ -13,7 +13,7 @@ Models:
 from .base import Base
 from .tenant import Tenant, MarketplaceType
 from .user import User, UserRole
-from .subscription import Subscription, PlanType, SubscriptionStatus
+from .subscription import Subscription
 from .sync_log import SyncLog
 from .refresh_token import RefreshToken
 from .webhook import WebhookConfig

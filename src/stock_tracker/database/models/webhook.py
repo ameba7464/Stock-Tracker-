@@ -44,7 +44,7 @@ class WebhookConfig(Base):
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
-    tenant = relationship("Tenant", back_populates="webhook_configs")
+    tenant = relationship("Tenant")
     
     def __repr__(self):
         return f"<WebhookConfig(id={self.id}, tenant_id={self.tenant_id}, url='{self.url[:50]}...', active={self.is_active})>"

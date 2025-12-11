@@ -107,7 +107,7 @@ class Product(Base):
     orders_by_warehouse = Column(JSONB, default=dict)  # {"warehouse_name": orders_count}
     
     # Relationships
-    tenant = relationship("Tenant", back_populates="products")
+    tenant = relationship("Tenant")
     
     # Composite indexes for performance
     __table_args__ = (
