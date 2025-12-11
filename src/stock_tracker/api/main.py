@@ -20,8 +20,9 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.staticfiles import StaticFiles
 
-from stock_tracker.api.routes import auth, tenants, products, health, analytics, sheets
+from stock_tracker.api.routes import auth, tenants, products, health, analytics, sheets, admin
 from stock_tracker.api.middleware.tenant_context import TenantContextMiddleware
 from stock_tracker.api.middleware.error_handler import ErrorHandlerMiddleware
 from stock_tracker.api.middleware.rate_limiter import RateLimitMiddleware
@@ -101,19 +102,32 @@ app.include_router(tenants.router, prefix="/api/v1/tenants", tags=["Tenants"])
 app.include_router(products.router, prefix="/api/v1/products", tags=["Products"])
 app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["Analytics"])
 app.include_router(sheets.router, prefix="/api/v1/sheets", tags=["Google Sheets"])
+app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin Panel"])
 app.include_router(health.router, prefix="/api/v1/health", tags=["Health"])
+
+# Mount static files for admin panel
+static_path = Path(__file__).parent.parent / "static"
+if static_path.exists():
+    app.mount("/admin", StaticFiles(directory=str(static_path), html=True), name="static")
+    logger.info(f"✅ Admin panel mounted at /admin (static files from {static_path})")
+else:
+    logger.warning(f"⚠️ Static directory not found: {static_path}")
 
 
 @app.get("/metrics", tags=["Monitoring"])
 async def metrics():
     """Prometheus metrics endpoint."""
     from fastapi.responses import PlainTextResponse
-    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
-    metrics_obj = get_metrics()
-    return PlainTextResponse(
-        generate_latest(metrics_obj.registry),
-        media_type=CONTENT_TYPE_LATEST
-    )
+    from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, REGISTRY
+    try:
+        # Use default REGISTRY which is always available
+        return PlainTextResponse(
+            generate_latest(REGISTRY),
+            media_type=CONTENT_TYPE_LATEST
+        )
+    except Exception as e:
+        logger.error(f"Error generating metrics: {e}")
+        return PlainTextResponse(f"# Error: {str(e)}\n", media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/", tags=["Root"])

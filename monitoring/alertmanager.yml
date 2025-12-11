@@ -1,0 +1,155 @@
+# Alertmanager configuration for Stock Tracker
+# Sends alerts to Telegram: @Enotiz
+
+global:
+  resolve_timeout: 5m
+  
+  # Telegram configuration
+  telegram_api_url: 'https://api.telegram.org'
+
+# Templates for alert messages
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Route configuration
+route:
+  # Default receiver
+  receiver: 'telegram-default'
+  
+  # Group alerts by these labels
+  group_by: ['alertname', 'service', 'severity']
+  
+  # Wait before sending initial notification
+  group_wait: 10s
+  
+  # Wait before sending notifications about new alerts in the same group
+  group_interval: 10s
+  
+  # Wait before re-sending resolved alerts
+  repeat_interval: 3h
+  
+  # Child routes
+  routes:
+    # Critical alerts - immediate notification
+    - receiver: 'telegram-critical'
+      match:
+        severity: critical
+      group_wait: 5s
+      group_interval: 5s
+      repeat_interval: 30m
+      
+    # Warning alerts - less urgent
+    - receiver: 'telegram-warnings'
+      match:
+        severity: warning
+      group_wait: 30s
+      group_interval: 2m
+      repeat_interval: 6h
+      
+    # Info alerts - daily digest
+    - receiver: 'telegram-info'
+      match:
+        severity: info
+      group_wait: 5m
+      group_interval: 30m
+      repeat_interval: 24h
+
+# Inhibition rules - suppress less severe alerts when more severe ones are active
+inhibit_rules:
+  # Suppress warning if critical alert is firing
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'service']
+    
+  # Suppress info if warning or critical is firing
+  - source_match_re:
+      severity: 'critical|warning'
+    target_match:
+      severity: 'info'
+    equal: ['alertname', 'service']
+
+# Receivers configuration
+receivers:
+  # Default receiver for all alerts
+  - name: 'telegram-default'
+    telegram_configs:
+      - bot_token: '8558236991:AAHFu2krkBMIWFKF6W_MkIYoIFbfw-d1kms'
+        chat_id: 1651759646  # Your Telegram user ID
+        api_url: 'https://api.telegram.org'
+        parse_mode: 'HTML'
+        message: |
+          <b>🔔 {{ .GroupLabels.alertname }}</b>
+          
+          <b>Service:</b> {{ .GroupLabels.service }}
+          <b>Severity:</b> {{ .CommonLabels.severity }}
+          <b>Status:</b> {{ .Status }}
+          
+          {{ range .Alerts }}
+          <b>Alert:</b> {{ .Labels.alertname }}
+          <b>Summary:</b> {{ .Annotations.summary }}
+          <b>Description:</b> {{ .Annotations.description }}
+          {{ if .Annotations.runbook }}<b>Runbook:</b> {{ .Annotations.runbook }}{{ end }}
+          <b>Started:</b> {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+
+  # Critical alerts - urgent notification
+  - name: 'telegram-critical'
+    telegram_configs:
+      - bot_token: '8558236991:AAHFu2krkBMIWFKF6W_MkIYoIFbfw-d1kms'
+        chat_id: 1651759646
+        api_url: 'https://api.telegram.org'
+        parse_mode: 'HTML'
+        message: |
+          🚨 <b>CRITICAL ALERT</b> 🚨
+          
+          <b>⚠️ {{ .GroupLabels.alertname }}</b>
+          <b>Service:</b> {{ .GroupLabels.service }}
+          <b>Status:</b> {{ .Status | toUpper }}
+          
+          {{ range .Alerts }}
+          <b>Summary:</b> {{ .Annotations.summary }}
+          <b>Description:</b> {{ .Annotations.description }}
+          {{ if .Annotations.runbook }}
+          <b>🔧 Runbook:</b> {{ .Annotations.runbook }}
+          {{ end }}
+          <b>⏰ Started:</b> {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ if .EndsAt }}<b>Resolved:</b> {{ .EndsAt.Format "2006-01-02 15:04:05" }}{{ end }}
+          {{ end }}
+          
+          <b>🔗 Dashboard:</b> http://localhost:3000
+
+  # Warning alerts
+  - name: 'telegram-warnings'
+    telegram_configs:
+      - bot_token: '8558236991:AAHFu2krkBMIWFKF6W_MkIYoIFbfw-d1kms'
+        chat_id: 1651759646
+        api_url: 'https://api.telegram.org'
+        parse_mode: 'HTML'
+        message: |
+          ⚠️ <b>WARNING</b>
+          
+          <b>{{ .GroupLabels.alertname }}</b>
+          <b>Service:</b> {{ .GroupLabels.service }}
+          
+          {{ range .Alerts }}
+          <b>Summary:</b> {{ .Annotations.summary }}
+          <b>Description:</b> {{ .Annotations.description }}
+          <b>Started:</b> {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+
+  # Info alerts
+  - name: 'telegram-info'
+    telegram_configs:
+      - bot_token: '8558236991:AAHFu2krkBMIWFKF6W_MkIYoIFbfw-d1kms'
+        chat_id: 1651759646
+        api_url: 'https://api.telegram.org'
+        parse_mode: 'HTML'
+        message: |
+          ℹ️ <b>INFO</b>
+          
+          <b>{{ .GroupLabels.alertname }}</b>
+          {{ range .Alerts }}
+          {{ .Annotations.summary }}
+          {{ end }}

@@ -1,0 +1,277 @@
+# Prometheus Alert Rules for Stock Tracker
+# Best practices: Multiple severity levels, clear descriptions, actionable alerts
+
+groups:
+  - name: stock_tracker_critical
+    interval: 30s
+    rules:
+      # ========== Application Health ==========
+      - alert: APIDown
+        expr: up{job="stock-tracker-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "Stock Tracker API is down"
+          description: "API instance {{ $labels.instance }} has been down for more than 1 minute."
+          runbook: "Check docker logs: docker logs stock-tracker-api"
+
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(http_requests_total{status=~"5.."}[5m])) 
+            / 
+            sum(rate(http_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%)"
+          
+      # ========== Database Alerts ==========
+      - alert: PostgreSQLDown
+        expr: up{job="postgresql"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: postgresql
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL database has been down for more than 1 minute."
+          runbook: "Check PostgreSQL: docker logs stock-tracker-postgres"
+
+      - alert: HighDatabaseConnections
+        expr: |
+          pg_stat_database_numbackends{datname="stock_tracker"} > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: "High number of database connections"
+          description: "Database has {{ $value }} active connections (threshold: 80)"
+
+      - alert: DatabaseConnectionPoolExhausted
+        expr: |
+          pg_stat_database_numbackends{datname="stock_tracker"} > 95
+        for: 2m
+        labels:
+          severity: critical
+          service: postgresql
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "Database has {{ $value }} active connections (max: 100)"
+
+      # ========== Redis Alerts ==========
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: redis
+        annotations:
+          summary: "Redis is down"
+          description: "Redis cache has been down for more than 1 minute."
+          runbook: "Check Redis: docker logs stock-tracker-redis"
+
+      - alert: RedisHighMemoryUsage
+        expr: |
+          redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: "Redis memory usage is high"
+          description: "Redis is using {{ $value | humanizePercentage }} of available memory"
+
+      # ========== Celery Alerts ==========
+      - alert: CeleryWorkerDown
+        expr: up{job="celery"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: celery
+        annotations:
+          summary: "Celery worker is down"
+          description: "No Celery workers are running"
+          runbook: "Check worker: docker logs stock-tracker-worker"
+
+      - alert: CeleryQueueBacklog
+        expr: |
+          sum(celery_queue_length) > 100
+        for: 10m
+        labels:
+          severity: warning
+          service: celery
+        annotations:
+          summary: "Large Celery queue backlog"
+          description: "{{ $value }} tasks waiting in queue"
+
+      - alert: CeleryHighFailureRate
+        expr: |
+          (
+            sum(rate(celery_tasks_total{status="failure"}[5m]))
+            /
+            sum(rate(celery_tasks_total[5m]))
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: celery
+        annotations:
+          summary: "High Celery task failure rate"
+          description: "{{ $value | humanizePercentage }} of tasks are failing"
+
+  - name: stock_tracker_performance
+    interval: 1m
+    rules:
+      # ========== Latency Alerts ==========
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95, 
+            rate(http_request_duration_seconds_bucket[5m])
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "High API latency detected"
+          description: "95th percentile latency is {{ $value }}s (threshold: 2s)"
+
+      - alert: SlowDatabaseQueries
+        expr: |
+          histogram_quantile(0.95,
+            rate(db_query_duration_seconds_bucket[5m])
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+          service: postgresql
+        annotations:
+          summary: "Slow database queries detected"
+          description: "95th percentile query time is {{ $value }}s"
+
+  - name: stock_tracker_resources
+    interval: 30s
+    rules:
+      # ========== System Resources ==========
+      - alert: HighCPUUsage
+        expr: |
+          system_cpu_usage_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High CPU usage"
+          description: "CPU usage is {{ $value }}% (threshold: 80%)"
+
+      - alert: CriticalCPUUsage
+        expr: |
+          system_cpu_usage_percent > 95
+        for: 2m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: "Critical CPU usage"
+          description: "CPU usage is {{ $value }}% (threshold: 95%)"
+
+      - alert: HighMemoryUsage
+        expr: |
+          (
+            system_memory_usage_bytes 
+            / 
+            (system_memory_usage_bytes + system_memory_available_bytes)
+          ) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High memory usage"
+          description: "Memory usage is {{ $value | humanizePercentage }}"
+
+      - alert: CriticalMemoryUsage
+        expr: |
+          (
+            system_memory_usage_bytes 
+            / 
+            (system_memory_usage_bytes + system_memory_available_bytes)
+          ) > 0.95
+        for: 2m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: "Critical memory usage"
+          description: "Memory usage is {{ $value | humanizePercentage }}"
+
+      - alert: HighDiskUsage
+        expr: |
+          system_disk_usage_percent > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High disk usage"
+          description: "Disk usage is {{ $value }}%"
+
+      - alert: CriticalDiskUsage
+        expr: |
+          system_disk_usage_percent > 95
+        for: 2m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: "Critical disk usage"
+          description: "Disk usage is {{ $value }}% - immediate action required"
+
+  - name: stock_tracker_business
+    interval: 1m
+    rules:
+      # ========== Business Logic Alerts ==========
+      - alert: SyncOperationFailures
+        expr: |
+          (
+            sum(rate(sync_operations_total{status="failure"}[10m]))
+            /
+            sum(rate(sync_operations_total[10m]))
+          ) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+          service: sync
+        annotations:
+          summary: "High sync failure rate"
+          description: "{{ $value | humanizePercentage }} of sync operations are failing for {{ $labels.platform }}"
+
+      - alert: NoSyncActivity
+        expr: |
+          rate(sync_operations_total[30m]) == 0
+        for: 30m
+        labels:
+          severity: warning
+          service: sync
+        annotations:
+          summary: "No sync activity detected"
+          description: "No sync operations in the last 30 minutes - check if schedulers are running"
+
+      - alert: GoogleSheetsAPIErrors
+        expr: |
+          rate(sheets_operations_total{status="error"}[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: sheets
+        annotations:
+          summary: "Google Sheets API errors detected"
+          description: "High error rate in Google Sheets operations"
