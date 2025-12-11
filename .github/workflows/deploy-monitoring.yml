@@ -1,4 +1,4 @@
-name: Deploy Monitoring to Production
+name: Validate Monitoring Config
 
 on:
   push:
@@ -7,80 +7,20 @@ on:
     paths:
       - 'monitoring/**'
       - 'docker-compose.yml'
-      - 'src/stock_tracker/monitoring.py'
       - '.github/workflows/deploy-monitoring.yml'
   workflow_dispatch:
 
-env:
-  DOCKER_BUILDKIT: 1
-  COMPOSE_DOCKER_CLI_BUILD: 1
-
 jobs:
-  deploy-monitoring:
-    name: Deploy Monitoring System
+  validate:
+    name: Validate Monitoring Configuration
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate Prometheus config
+      - name: Validate Prometheus Config
         run: |
-          docker run --rm -v $(pwd)/monitoring/prometheus.yml:/prometheus.yml prom/prometheus:v2.48.0 \
-            promtool check config /prometheus.yml
-
-      - name: Configuration validation complete
-        run: |
+          docker run --rm -v $(pwd)/monitoring/prometheus.yml:/prometheus.yml \
+            prom/prometheus:v2.48.0 promtool check config /prometheus.yml
           echo "✅ Prometheus configuration is valid"
-          echo ""
-          echo "ℹ️ Manual deployment required:"
-          echo "  Run: docker-compose up -d --force-recreate prometheus grafana alertmanager"
-
-      # Deployment disabled - manual deployment required
-      # Uncomment and configure secrets (VM_HOST, VM_USER, VM_SSH_KEY) to enable
-      # - name: Deploy to server via SSH
-      #   if: github.ref == 'refs/heads/main'
-      #   uses: appleboy/ssh-action@v1.0.0
-      #   with:
-      #     host: ${{ secrets.VM_HOST }}
-      #     username: ${{ secrets.VM_USER }}
-      #     key: ${{ secrets.VM_SSH_KEY }}
-      #     port: ${{ secrets.SSH_PORT || 22 }}
-      #     script: |
-      #       cd /root/Stock-Tracker
-      #       git pull origin main
-      #       mkdir -p monitoring/secrets
-      #       echo "${{ secrets.TELEGRAM_BOT_TOKEN }}" > monitoring/secrets/telegram_bot_token.txt
-      #       chmod 600 monitoring/secrets/telegram_bot_token.txt
-      #       docker-compose pull prometheus grafana alertmanager
-      #       docker-compose up -d --force-recreate prometheus grafana alertmanager
-      #       sleep 10
-      #       curl -f http://localhost:9090/-/healthy || exit 1
-      #       curl -f http://localhost:9093/-/healthy || exit 1
-      #       curl -f http://localhost:3000/api/health || exit 1
-
-      - name: Send deployment notification
-        if: always()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_ALERT_CHAT_ID }}
-        run: |
-          STATUS="${{ job.status }}"
-          if [ "$STATUS" == "success" ]; then
-            EMOJI="✅"
-            MESSAGE="Monitoring validation SUCCESSFUL"
-          else
-            EMOJI="❌"
-            MESSAGE="Monitoring validation FAILED"
-          fi
-          
-          # Only send if secrets are set
-          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
-            TEXT="${EMOJI} ${MESSAGE}\n\nCommit: ${{ github.sha }}\nBranch: ${{ github.ref_name }}\nWorkflow: ${{ github.workflow }}\nStatus: Configuration validation only"
-            curl -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-              -d "chat_id=${TELEGRAM_CHAT_ID}" \
-              -d "text=${TEXT}" \
-              -d "parse_mode=HTML" || echo "Failed to send Telegram notification"
-          else
-            echo "Telegram secrets not configured, skipping notification"
-          fi
