@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -57,48 +57,39 @@ jobs:
         run: |
           python -c "from src.stock_tracker.monitoring import PrometheusMetrics; m = PrometheusMetrics(); print('✅ Metrics initialized')"
 
-      - name: Deploy to server via SSH
-        if: github.ref == 'refs/heads/main'
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          port: ${{ secrets.SSH_PORT || 22 }}
-          script: |
-            cd /root/Stock-Tracker
-            
-            # Backup current config
-            mkdir -p backups
-            cp docker-compose.yml backups/docker-compose.yml.$(date +%Y%m%d_%H%M%S) || true
-            
-            # Pull latest code
-            git pull origin main
-            
-            # Create monitoring secrets
-            mkdir -p monitoring/secrets
-            echo "${{ secrets.TELEGRAM_BOT_TOKEN }}" > monitoring/secrets/telegram_bot_token.txt
-            chmod 600 monitoring/secrets/telegram_bot_token.txt
-            
-            # Update environment variables
-            sed -i 's/TELEGRAM_ALERT_CHAT_ID=.*/TELEGRAM_ALERT_CHAT_ID=${{ secrets.TELEGRAM_ALERT_CHAT_ID }}/' .env
-            sed -i 's/GRAFANA_PASSWORD=.*/GRAFANA_PASSWORD=${{ secrets.GRAFANA_PASSWORD }}/' .env
-            
-            # Pull new images
-            docker-compose pull prometheus grafana alertmanager postgres-exporter redis-exporter node-exporter cadvisor
-            
-            # Restart monitoring services
-            docker-compose up -d --force-recreate prometheus grafana alertmanager postgres-exporter redis-exporter node-exporter cadvisor
-            
-            # Wait for services to be ready
-            sleep 10
-            
-            # Health check
-            curl -f http://localhost:9090/-/healthy || exit 1
-            curl -f http://localhost:9093/-/healthy || exit 1
-            curl -f http://localhost:3000/api/health || exit 1
-            
-            echo "✅ Monitoring deployment completed successfully"
+      - name: Configuration validation complete
+        run: |
+          echo "✅ All monitoring configurations are valid"
+          echo "📋 Validated:"
+          echo "  - Prometheus config"
+          echo "  - Alertmanager config"
+          echo "  - Metrics endpoint"
+          echo ""
+          echo "ℹ️ Manual deployment required:"
+          echo "  Run: docker-compose up -d --force-recreate prometheus grafana alertmanager"
+
+      # Deployment disabled - manual deployment required
+      # Uncomment and configure secrets (VM_HOST, VM_USER, VM_SSH_KEY) to enable
+      # - name: Deploy to server via SSH
+      #   if: github.ref == 'refs/heads/main'
+      #   uses: appleboy/ssh-action@v1.0.0
+      #   with:
+      #     host: ${{ secrets.VM_HOST }}
+      #     username: ${{ secrets.VM_USER }}
+      #     key: ${{ secrets.VM_SSH_KEY }}
+      #     port: ${{ secrets.SSH_PORT || 22 }}
+      #     script: |
+      #       cd /root/Stock-Tracker
+      #       git pull origin main
+      #       mkdir -p monitoring/secrets
+      #       echo "${{ secrets.TELEGRAM_BOT_TOKEN }}" > monitoring/secrets/telegram_bot_token.txt
+      #       chmod 600 monitoring/secrets/telegram_bot_token.txt
+      #       docker-compose pull prometheus grafana alertmanager
+      #       docker-compose up -d --force-recreate prometheus grafana alertmanager
+      #       sleep 10
+      #       curl -f http://localhost:9090/-/healthy || exit 1
+      #       curl -f http://localhost:9093/-/healthy || exit 1
+      #       curl -f http://localhost:3000/api/health || exit 1
 
       - name: Send deployment notification
         if: always()
@@ -106,10 +97,10 @@ jobs:
           STATUS="${{ job.status }}"
           if [ "$STATUS" == "success" ]; then
             EMOJI="✅"
-            MESSAGE="Monitoring deployment SUCCESSFUL"
+            MESSAGE="Monitoring validation SUCCESSFUL"
           else
             EMOJI="❌"
-            MESSAGE="Monitoring deployment FAILED"
+            MESSAGE="Monitoring validation FAILED"
           fi
           
           curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
@@ -119,5 +110,6 @@ jobs:
           Commit: ${{ github.sha }}
           Branch: ${{ github.ref_name }}
           Workflow: ${{ github.workflow }}
+          Status: Configuration validation only (manual deployment required)
           " \
             -d "parse_mode=HTML"
