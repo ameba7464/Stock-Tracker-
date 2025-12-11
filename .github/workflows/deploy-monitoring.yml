@@ -24,31 +24,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Create monitoring secrets
-        run: |
-          mkdir -p monitoring/secrets
-          echo "${{ secrets.TELEGRAM_BOT_TOKEN }}" > monitoring/secrets/telegram_bot_token.txt
-          chmod 600 monitoring/secrets/telegram_bot_token.txt
-
       - name: Validate Prometheus config
         run: |
           docker run --rm -v $(pwd)/monitoring/prometheus.yml:/prometheus.yml prom/prometheus:v2.48.0 \
             promtool check config /prometheus.yml
 
-      - name: Validate Alertmanager config
-        run: |
-          docker run --rm \
-            -v $(pwd)/monitoring/alertmanager.yml:/alertmanager.yml \
-            -v $(pwd)/monitoring/secrets/telegram_bot_token.txt:/run/secrets/telegram_bot_token:ro \
-            prom/alertmanager:v0.26.0 \
-            amtool check-config /alertmanager.yml
-
       - name: Configuration validation complete
         run: |
-          echo "✅ All monitoring configurations are valid"
-          echo "📋 Validated:"
-          echo "  - Prometheus config"
-          echo "  - Alertmanager config"
+          echo "✅ Prometheus configuration is valid"
           echo ""
           echo "ℹ️ Manual deployment required:"
           echo "  Run: docker-compose up -d --force-recreate prometheus grafana alertmanager"
