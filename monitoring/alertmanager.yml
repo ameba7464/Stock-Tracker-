@@ -75,8 +75,8 @@ receivers:
   # Default receiver for all alerts
   - name: 'telegram-default'
     telegram_configs:
-      - bot_token: '8558236991:AAHFu2krkBMIWFKF6W_MkIYoIFbfw-d1kms'
-        chat_id: 1651759646  # Your Telegram user ID
+      - bot_token_file: '/run/secrets/telegram_bot_token'
+        chat_id: 1651759646
         api_url: 'https://api.telegram.org'
         parse_mode: 'HTML'
         message: |
@@ -97,7 +97,7 @@ receivers:
   # Critical alerts - urgent notification
   - name: 'telegram-critical'
     telegram_configs:
-      - bot_token: '8558236991:AAHFu2krkBMIWFKF6W_MkIYoIFbfw-d1kms'
+      - bot_token_file: '/run/secrets/telegram_bot_token'
         chat_id: 1651759646
         api_url: 'https://api.telegram.org'
         parse_mode: 'HTML'
@@ -123,7 +123,7 @@ receivers:
   # Warning alerts
   - name: 'telegram-warnings'
     telegram_configs:
-      - bot_token: '8558236991:AAHFu2krkBMIWFKF6W_MkIYoIFbfw-d1kms'
+      - bot_token_file: '/run/secrets/telegram_bot_token'
         chat_id: 1651759646
         api_url: 'https://api.telegram.org'
         parse_mode: 'HTML'
@@ -142,7 +142,7 @@ receivers:
   # Info alerts
   - name: 'telegram-info'
     telegram_configs:
-      - bot_token: '8558236991:AAHFu2krkBMIWFKF6W_MkIYoIFbfw-d1kms'
+      - bot_token_file: '/run/secrets/telegram_bot_token'
         chat_id: 1651759646
         api_url: 'https://api.telegram.org'
         parse_mode: 'HTML'

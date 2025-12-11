@@ -209,10 +209,10 @@ services:
     volumes:
       - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - ./monitoring/alertmanager/templates:/etc/alertmanager/templates:ro
+      - ./monitoring/secrets/telegram_bot_token.txt:/run/secrets/telegram_bot_token:ro
       - alertmanager_data:/alertmanager
     environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_ALERT_CHAT_ID: ${TELEGRAM_ALERT_CHAT_ID}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_ALERT_CHAT_ID}
     networks:
       - stock-tracker-network
     restart: unless-stopped
