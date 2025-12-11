@@ -43,11 +43,19 @@
 - Usage tracking (API calls, syncs)
 - Customer Portal для self-service
 
-### 📊 Enterprise Monitoring
-- **Prometheus** - Metrics collection (15s scrape)
-- **Grafana** - Visualization dashboards (7 panels)
+### 📊 Enterprise Monitoring & Alerting ⭐ NEW!
+- **Prometheus** - Metrics collection (30+ metrics, 15s scrape interval)
+- **Grafana** - Visualization dashboards (2 dashboards, 14 panels)
+- **Alertmanager** - Telegram notifications with Docker secrets
 - **Sentry** - Error tracking & performance
 - **Flower** - Celery monitoring UI
+- **Exporters** - PostgreSQL, Redis, Node, cAdvisor
+- **Alert Rules** - 20+ configured alerts (critical, warning, info)
+- **Dashboards** - Overview (8 panels), Business Metrics (6 panels)
+- **Docker Secrets** - Secure token storage for production
+- **GitHub Actions** - Automated deployment & health checks
+
+👉 **[Мониторинг - Быстрый старт (5 минут)](MONITORING_QUICKSTART.md)** | **[Docker Secrets Setup](monitoring/DOCKER_SECRETS_SETUP.md)**
 - Health checks для Kubernetes
 
 ### 🔒 Security
@@ -164,6 +172,8 @@ Comprehensive guides available:
 | Document | Description |
 |----------|-------------|
 | **[QUICKSTART.md](QUICKSTART.md)** | Начало работы за 5 минут + все API endpoints |
+| **[MONITORING_QUICKSTART.md](MONITORING_QUICKSTART.md)** | 🆕⭐ Мониторинг: Быстрый старт за 5 минут (Prometheus + Grafana + Telegram) |
+| **[docs/MONITORING_GUIDE.md](docs/MONITORING_GUIDE.md)** | 🆕⭐ Мониторинг: Полное руководство (50+ страниц) |
 | **[GOOGLE_SHEETS_QUICKSTART.md](docs/GOOGLE_SHEETS_QUICKSTART.md)** | 🆕 Быстрый старт: Новая структура Google Sheets v2.0 |
 | **[GOOGLE_SHEETS_HORIZONTAL_LAYOUT.md](docs/GOOGLE_SHEETS_HORIZONTAL_LAYOUT.md)** | 🆕 Полная документация: Горизонтальная раскладка складов |
 | **[PRODUCTION_DEPLOYMENT_GUIDE.md](PRODUCTION_DEPLOYMENT_GUIDE.md)** | Production развертывание (AWS, GCP, DO, Heroku) |
