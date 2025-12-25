@@ -192,7 +192,7 @@ class WBIntegrationService:
             # Создаем новую таблицу
             logger.info("Creating new Google Sheet")
             sheet_id = await google_sheets_service.create_sheet(
-                user_name=user.name,
+                user_name=user.full_name,
                 telegram_id=user.telegram_id,
                 data=wb_data
             )

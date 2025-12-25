@@ -1,0 +1,29 @@
+[Unit]
+Description=Stock Tracker Telegram Bot
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=stock-bot
+Group=stock-bot
+WorkingDirectory=/opt/stock-tracker-bot
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONUTF8=1"
+Environment="TZ=Europe/Moscow"
+EnvironmentFile=/opt/stock-tracker-bot/.env
+ExecStart=/opt/stock-tracker-bot/venv/bin/python -m app.main
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/stock-tracker-bot/bot.log
+StandardError=append:/var/log/stock-tracker-bot/error.log
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/stock-tracker-bot /opt/stock-tracker-bot/logs
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,47 @@
+{
+  "project": "Stock Tracker - Multi-Tenant SaaS Platform",
+  "version": "2.1.0",
+  "lastUpdated": "2025-12-25",
+  
+  "criticalRules": {
+    "telegramBot": {
+      "productionLocation": "Yandex Cloud (Docker container)",
+      "localExecution": "FORBIDDEN",
+      "reason": "Creates conflict - bot stops responding to commands",
+      "deployMethod": "GitHub Actions auto-deploy",
+      "diagnosticScript": "telegram-bot/check_bot_status.py",
+      "documentation": [
+        ".ai/DEVELOPMENT_NOTES.md",
+        "telegram-bot/DO_NOT_RUN_LOCALLY.md",
+        "BOT_DIAGNOSIS_REPORT.md"
+      ]
+    }
+  },
+  
+  "development": {
+    "allowedLocalCommands": [
+      "docker-compose up -d",
+      "pytest",
+      "python telegram-bot/check_bot_status.py"
+    ],
+    "forbiddenCommands": [
+      "python -m app.main",
+      "python telegram-bot/app/main.py",
+      "Any bot polling/webhook execution"
+    ]
+  },
+  
+  "productionStatus": {
+    "telegramBot": "Running 24/7 in Yandex Cloud",
+    "fastAPI": "Ready for deployment via Docker Compose",
+    "monitoring": "Configured (on-demand start)",
+    "cicd": "GitHub Actions active for bot deployment"
+  },
+  
+  "aiAssistantNotes": {
+    "primaryRule": "NEVER suggest or execute local Telegram bot with production token",
+    "diagnosticOnly": "Use check_bot_status.py for bot diagnostics",
+    "deployment": "All bot changes deploy via git push to main branch",
+    "conflictHistory": "2025-12-25: Two bot instances caused command processing failure"
+  }
+}

@@ -41,12 +41,12 @@ class AutoUpdateScheduler:
             self.scheduler.start()
             self.is_running = True
             
-            logger.info("✅ Scheduler started successfully")
-            logger.info("⏰ Next update scheduled for: 00:01 MSK daily")
+            logger.info("[OK] Scheduler started successfully")
+            logger.info("[SCHEDULE] Next update scheduled for: 00:01 MSK daily")
             
             # Логируем время следующего запуска
             next_run = self.scheduler.get_job('daily_update').next_run_time
-            logger.info(f"📅 Next run time: {next_run}")
+            logger.info(f"[SCHEDULE] Next run time: {next_run}")
             
         except Exception as e:
             logger.error(f"Failed to start scheduler: {e}", exc_info=True)
@@ -69,8 +69,8 @@ class AutoUpdateScheduler:
         Вызывается автоматически по расписанию.
         """
         logger.info("=" * 70)
-        logger.info("🔄 AUTOMATIC TABLE UPDATE STARTED")
-        logger.info(f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info("[UPDATE] AUTOMATIC TABLE UPDATE STARTED")
+        logger.info(f"[TIME] Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info("=" * 70)
         
         updated_count = 0
@@ -88,26 +88,26 @@ class AutoUpdateScheduler:
                 users = result.scalars().all()
                 
                 total_users = len(users)
-                logger.info(f"📊 Found {total_users} users with configured tables")
+                logger.info(f"[STATS] Found {total_users} users with configured tables")
                 
                 if total_users == 0:
-                    logger.info("ℹ️ No users to update")
+                    logger.info("[INFO] No users to update")
                     return
                 
                 # Обновляем таблицы каждого пользователя
                 for i, user in enumerate(users, 1):
                     try:
-                        logger.info(f"[{i}/{total_users}] Updating table for user {user.telegram_id} ({user.name})")
+                        logger.info(f"[{i}/{total_users}] Updating table for user {user.telegram_id} ({user.full_name})")
                         
                         # Обновляем таблицу
                         result = await wb_integration.update_existing_table(user, session)
                         
                         if result:
                             updated_count += 1
-                            logger.info(f"✅ [{i}/{total_users}] User {user.telegram_id} updated successfully")
+                            logger.info(f"[OK] [{i}/{total_users}] User {user.telegram_id} updated successfully")
                         else:
                             error_count += 1
-                            logger.warning(f"⚠️ [{i}/{total_users}] Failed to update user {user.telegram_id}")
+                            logger.warning(f"[WARNING] [{i}/{total_users}] Failed to update user {user.telegram_id}")
                         
                         # Небольшая пауза между обновлениями для снижения нагрузки
                         if i < total_users:
@@ -115,15 +115,15 @@ class AutoUpdateScheduler:
                         
                     except Exception as e:
                         error_count += 1
-                        logger.error(f"❌ Error updating user {user.telegram_id}: {e}", exc_info=True)
+                        logger.error(f"[ERROR] Error updating user {user.telegram_id}: {e}", exc_info=True)
                         continue
                 
                 # Итоговая статистика
                 logger.info("=" * 70)
-                logger.info("📊 UPDATE SUMMARY")
-                logger.info(f"✅ Successfully updated: {updated_count}/{total_users}")
-                logger.info(f"❌ Failed: {error_count}/{total_users}")
-                logger.info(f"⏱️ Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                logger.info("[SUMMARY] UPDATE SUMMARY")
+                logger.info(f"[OK] Successfully updated: {updated_count}/{total_users}")
+                logger.info(f"[ERROR] Failed: {error_count}/{total_users}")
+                logger.info(f"[TIME] Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 logger.info("=" * 70)
                 
         except Exception as e:
@@ -134,7 +134,7 @@ class AutoUpdateScheduler:
         Ручной запуск обновления всех таблиц.
         Используется для тестирования или внеплановых обновлений.
         """
-        logger.info("🔧 Manual update triggered")
+        logger.info("[MANUAL] Manual update triggered")
         await self.update_all_user_tables()
     
     def get_next_run_time(self) -> datetime:

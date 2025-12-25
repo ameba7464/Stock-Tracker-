@@ -9,6 +9,7 @@ from app.database.crud import get_user_by_telegram_id
 from app.bot.states import RegistrationStates
 from app.bot.keyboards.inline import get_main_menu_keyboard
 from app.bot.utils.messages import Messages, UserStatus
+from app.services.subscription import check_user_access
 from app.utils.logger import logger
 
 router = Router()
@@ -32,9 +33,12 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession):
     # Проверяем, зарегистрирован ли пользователь
     user = await get_user_by_telegram_id(session, telegram_id)
     
-    if user and user.payment_status == 'completed':
-        # Пользователь уже зарегистрирован - показываем главное меню
-        await state.clear()
+    if user:
+        # Проверяем доступ через unified систему
+        has_access = await check_user_access(user.id, session)
+        if has_access:
+            # Пользователь имеет доступ - показываем главное меню
+            await state.clear()
         has_api_key = bool(user.wb_api_key)
         has_table = bool(user.google_sheet_id)
         
@@ -45,7 +49,7 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession):
         )
         
         # Красивое приветствие
-        welcome_text = Messages.welcome_returning_user(user.name, status)
+        welcome_text = Messages.welcome_returning_user(user.full_name, status)
         
         await message.answer(
             welcome_text,

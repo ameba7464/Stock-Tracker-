@@ -1,9 +1,22 @@
+# Monitoring Health Check Workflow
+# =================================
+# 
+# Status: ⚠️ DISABLED - Automatic runs are commented out
+# Reason: Monitoring services run locally/in Docker, not accessible from GitHub Actions
+# 
+# This workflow can still be run manually via workflow_dispatch when needed.
+# For production monitoring status, see PRODUCTION_STATUS.md
+# 
+# Last modified: 2025-12-25
+# =================================
+
 name: Monitoring Health Check
 
 on:
-  schedule:
-    # Run every 6 hours
-    - cron: '0 */6 * * *'
+  # Disabled automatic runs - run manually only when needed
+  # schedule:
+  #   # Run every 6 hours
+  #   - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:

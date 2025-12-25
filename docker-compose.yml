@@ -1,3 +1,19 @@
+# Stock Tracker - Production Docker Compose Configuration
+# ========================================================
+# 
+# Status: ✅ Production-ready, configured for 24/7 operation
+# All services configured with: restart: unless-stopped
+# 
+# Services (15 total):
+# - Core: postgres, redis, api, worker, beat, flower
+# - Monitoring: prometheus, grafana, alertmanager
+# - Exporters: celery-exporter, postgres-exporter, redis-exporter, 
+#              node-exporter, cadvisor
+# - Proxy: nginx
+#
+# Documentation: See PRODUCTION_STATUS.md for full details
+# ========================================================
+
 services:
   # PostgreSQL Database
   postgres:

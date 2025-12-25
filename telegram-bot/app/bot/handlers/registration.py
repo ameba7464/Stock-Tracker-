@@ -9,7 +9,8 @@ from app.bot.keyboards.reply import get_phone_keyboard, remove_keyboard
 from app.bot.keyboards.inline import get_main_menu_keyboard
 from app.bot.utils.messages import Messages
 from app.services.validation import validate_email, validate_name, validate_phone
-from app.database.crud import create_user, update_user_payment_status, mark_google_sheet_sent
+from app.database.crud import get_or_create_user, update_user_payment_status, mark_google_sheet_sent
+from app.services.subscription import get_or_create_subscription, check_user_access
 from app.config import settings
 from app.utils.logger import logger
 
@@ -124,8 +125,8 @@ async def complete_registration(
     telegram_id = message.from_user.id
     
     try:
-        # Создаем пользователя в БД
-        user = await create_user(
+        # Получаем или создаем пользователя (безопасно от race condition)
+        user, was_created = await get_or_create_user(
             session=session,
             telegram_id=telegram_id,
             name=data['name'],
@@ -133,17 +134,47 @@ async def complete_registration(
             phone=phone
         )
         
+        # Если пользователь уже существовал, обновляем его данные
+        if not was_created:
+            logger.info(f"User already exists, updating data: telegram_id={telegram_id}")
+            # Обновляем только если данные изменились
+            if user.full_name != data['name'] or user.email != data['email'] or user.phone != phone:
+                user.full_name = data['name']
+                user.email = data['email']
+                user.phone = phone
+                await session.commit()
+                await session.refresh(user)
+        else:
+            logger.info(f"New user created: telegram_id={telegram_id}")
+        
         # ============================================
-        # [ТОЧКА ИНТЕГРАЦИИ ПЛАТЕЖЕЙ]
+        # [ТОЧКА ИНТЕГРАЦИИ ПЛАТЕЖЕЙ - FEATURE FLAG]
         # ============================================
-        # В будущем здесь добавить:
-        # if settings.payment_enabled:
-        #     await send_payment_invoice(message, user)
-        #     await state.set_state(RegistrationStates.PAYMENT_PENDING)
-        #     return
+        # Создаем или получаем подписку пользователя
+        subscription = await get_or_create_subscription(user.id, session)
+        
+        # Проверяем включены ли платежи
+        if settings.payment_enabled:
+            # ПРОДАКШН: Отправляем инвойс для оплаты
+            # TODO: Реализовать send_payment_invoice()
+            # await send_payment_invoice(message, user, subscription)
+            # await state.set_state(RegistrationStates.PAYMENT_PENDING)
+            # return
+            
+            # Пока платежи не реализованы - даем триал
+            logger.info(f"Payment enabled but not implemented - granting trial to {telegram_id}")
+        
+        # MVP РЕЖИМ или временный доступ: Сразу даем доступ
+        # Подписка уже создана с правильным статусом в get_or_create_subscription()
+        logger.info(
+            f"User {telegram_id} granted access: "
+            f"payment_enabled={settings.payment_enabled}, "
+            f"subscription_status={subscription.status}"
+        )
+        
         # ============================================
         
-        # Временно: сразу даем доступ (MVP без оплаты)
+        # Временно: сохраняем обратную совместимость с payment_status
         await send_google_sheet(message, session, user, data['name'])
         
         # Очищаем состояние

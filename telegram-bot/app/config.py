@@ -32,10 +32,14 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
     
-    # Payment (заглушка)
-    payment_enabled: bool = False
+    # Payment & Subscription Configuration
+    payment_enabled: bool = False  # FALSE = MVP (бесплатный доступ для всех)
     payment_provider: str = "yookassa"
     payment_token: str = ""
+    
+    # Subscription Settings
+    free_trial_days: int = 7  # Триальный период при payment_enabled=True
+    subscription_price: int = 299  # Руб/мес (или другая валюта)
     
     def get_database_url(self) -> str:
         """Возвращает URL подключения к базе данных."""
@@ -47,12 +51,12 @@ class Settings(BaseSettings):
                 url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
             return url
             
-        # PostgreSQL (production) - если указаны параметры подключения
-        if self.db_host != "localhost" or self.db_port != 5432:
+        # PostgreSQL - если указаны обязательные параметры
+        if self.db_user and self.db_password and self.db_name:
             ssl_param = "?ssl=require" if "yandexcloud" in self.db_host or self.db_port == 6432 else ""
             return f"postgresql+asyncpg://{self.db_user}:{self.db_password}@{self.db_host}:{self.db_port}/{self.db_name}{ssl_param}"
         
-        # SQLite (development)
+        # SQLite (development) - fallback
         return f"sqlite+aiosqlite:///{self.db_name}"
     
     @property

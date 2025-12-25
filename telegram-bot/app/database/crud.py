@@ -3,7 +3,7 @@ from typing import Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database.models import User
+from app.database.models import User, PaymentStatus
 from app.utils.logger import logger
 
 
@@ -46,22 +46,83 @@ async def create_user(
         
     Returns:
         Созданный пользователь
+        
+    Raises:
+        Exception: Если пользователь с таким telegram_id уже существует
     """
     user = User(
         telegram_id=telegram_id,
-        name=name,
+        full_name=name,
         email=email,
         phone=phone,
-        payment_status='pending',
+        payment_status=PaymentStatus.free,
         google_sheet_sent=False
     )
     
     session.add(user)
-    await session.commit()
-    await session.refresh(user)
+    try:
+        await session.commit()
+        await session.refresh(user)
+        logger.info(f"User created: telegram_id={telegram_id}, name={name}")
+        return user
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"Error creating user: {e}")
+        raise
+
+
+async def get_or_create_user(
+    session: AsyncSession,
+    telegram_id: int,
+    name: str,
+    email: str,
+    phone: str
+) -> tuple[User, bool]:
+    """
+    Получить существующего пользователя или создать нового (безопасно от race condition).
     
-    logger.info(f"User created: telegram_id={telegram_id}, name={name}")
-    return user
+    Args:
+        session: Сессия БД
+        telegram_id: Telegram ID
+        name: Имя пользователя
+        email: Email
+        phone: Телефон
+        
+    Returns:
+        Tuple[User, bool]: (пользователь, был_ли_создан)
+    """
+    # Сначала пытаемся получить существующего пользователя
+    existing_user = await get_user_by_telegram_id(session, telegram_id)
+    if existing_user:
+        logger.info(f"User already exists: telegram_id={telegram_id}")
+        return existing_user, False
+    
+    # Пытаемся создать нового пользователя
+    try:
+        user = await create_user(
+            session=session,
+            telegram_id=telegram_id,
+            name=name,
+            email=email,
+            phone=phone
+        )
+        return user, True
+    except Exception as e:
+        # Если произошла ошибка уникальности (race condition)
+        error_str = str(e)
+        if "UniqueViolationError" in error_str or "duplicate key" in error_str or "UNIQUE constraint" in error_str:
+            logger.warning(f"Race condition during user creation, fetching existing user: telegram_id={telegram_id}")
+            # Откатываем сессию и пытаемся получить пользователя снова
+            await session.rollback()
+            existing_user = await get_user_by_telegram_id(session, telegram_id)
+            if existing_user:
+                return existing_user, False
+            else:
+                logger.error(f"User not found after race condition: telegram_id={telegram_id}")
+                raise
+        else:
+            # Другая ошибка - пробрасываем
+            raise
 
 
 async def update_user_payment_status(
@@ -150,7 +211,7 @@ async def update_user_name(
     Returns:
         Обновленный пользователь
     """
-    user.name = name
+    user.full_name = name
     await session.commit()
     await session.refresh(user)
     

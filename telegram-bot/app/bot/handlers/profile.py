@@ -36,7 +36,7 @@ async def callback_edit_name(callback: CallbackQuery, state: FSMContext, session
     await state.set_state(ProfileEditStates.WAITING_FOR_NAME)
     
     await callback.message.edit_text(
-        Messages.edit_name_prompt(user.name),
+        Messages.edit_name_prompt(user.full_name),
         parse_mode="HTML",
         reply_markup=get_cancel_keyboard("settings_profile")
     )
@@ -215,7 +215,7 @@ async def process_new_phone(message: Message, state: FSMContext, session: AsyncS
     
     # Обновляем данные для отображения профиля
     profile = UserProfile(
-        name=user.name,
+        name=user.full_name,
         email=user.email,
         phone=new_phone
     )
@@ -248,7 +248,7 @@ async def callback_cancel_edit_profile(callback: CallbackQuery, state: FSMContex
         return
     
     profile = UserProfile(
-        name=user.name,
+        name=user.full_name,
         email=user.email,
         phone=user.phone
     )

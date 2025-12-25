@@ -4,6 +4,7 @@ from aiogram.types import CallbackQuery
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.crud import get_user_by_telegram_id
+from app.services.subscription import check_user_access
 from app.bot.keyboards.inline import (
     get_main_menu_keyboard, 
     get_back_keyboard, 
@@ -37,7 +38,7 @@ async def callback_back_to_menu(callback: CallbackQuery, session: AsyncSession):
         has_table=has_table
     )
     
-    name = user.name if user else "друг"
+    name = user.full_name if user else "друг"
     
     # Используем компактное меню
     await callback.message.edit_text(
@@ -111,7 +112,7 @@ async def callback_settings_profile(callback: CallbackQuery, session: AsyncSessi
         return
     
     profile = UserProfile(
-        name=user.name,
+        name=user.full_name,
         email=user.email,
         phone=user.phone
     )
@@ -155,8 +156,17 @@ async def callback_get_sheet(callback: CallbackQuery, session: AsyncSession):
     telegram_id = callback.from_user.id
     user = await get_user_by_telegram_id(session, telegram_id)
     
-    if not user or user.payment_status != 'completed':
+    if not user:
         await callback.answer("❌ Вы еще не зарегистрированы!", show_alert=True)
+        return
+    
+    # Проверяем доступ через unified систему
+    has_access = await check_user_access(user.id, session)
+    if not has_access:
+        await callback.answer(
+            "❌ Для доступа к таблице необходима подписка. Используйте /subscribe",
+            show_alert=True
+        )
         return
     
     await callback.message.answer(

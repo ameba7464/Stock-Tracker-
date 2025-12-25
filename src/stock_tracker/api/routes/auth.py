@@ -20,6 +20,7 @@ from stock_tracker.auth import (
 )
 from stock_tracker.api.middleware.tenant_context import get_current_user
 from stock_tracker.utils.logger import get_logger
+from stock_tracker.utils.transaction import transaction_scope
 
 logger = get_logger(__name__)
 
@@ -75,6 +76,7 @@ async def register(
             detail="Email already registered"
         )
     
+    # Use explicit transaction management to ensure atomicity
     try:
         # Create tenant
         tenant = Tenant(
@@ -124,6 +126,7 @@ async def register(
         )
         db.add(refresh_token_record)
         
+        # Commit all changes in one transaction
         db.commit()
         
         logger.info(f"New tenant registered: {tenant.name} ({tenant.id})")

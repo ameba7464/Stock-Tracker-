@@ -5,8 +5,11 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-green.svg)](https://fastapi.tiangolo.com/)
+[![Production](https://img.shields.io/badge/Status-Production%2024%2F7-success.svg)](PRODUCTION_STATUS.md)
 
 **Мультитенантная SaaS платформа** для автоматизации учета товаров на маркетплейсах (Wildberries, Ozon) с интеграцией через Telegram бота, фоновой обработкой задач, подписочной моделью и enterprise мониторингом.
+
+> 🟢 **Production Status:** Система работает 24/7 в Yandex Cloud | [📊 Production Status](PRODUCTION_STATUS.md)
 
 > 🆕 **Версия 2.0:** Полностью переработанная архитектура с FastAPI, Celery, Docker, CI/CD и Stripe billing.
 > 
@@ -171,6 +174,7 @@ Comprehensive guides available:
 
 | Document | Description |
 |----------|-------------|
+| **[PRODUCTION_STATUS.md](PRODUCTION_STATUS.md)** | 🟢 **Production:** Статус системы 24/7, развернутые сервисы, CI/CD |
 | **[QUICKSTART.md](QUICKSTART.md)** | Начало работы за 5 минут + все API endpoints |
 | **[MONITORING_QUICKSTART.md](MONITORING_QUICKSTART.md)** | 🆕⭐ Мониторинг: Быстрый старт за 5 минут (Prometheus + Grafana + Telegram) |
 | **[docs/MONITORING_GUIDE.md](docs/MONITORING_GUIDE.md)** | 🆕⭐ Мониторинг: Полное руководство (50+ страниц) |

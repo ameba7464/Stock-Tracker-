@@ -7,6 +7,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [2.1.1] - 2025-12-25
+
+### 🤖 Telegram Bot - Critical Documentation Update
+
+#### Added
+- **.ai/DEVELOPMENT_NOTES.md** - Comprehensive AI assistant rules
+  - Critical rules for Telegram bot (no local execution)
+  - Development workflow guidelines
+  - Historical issues and solutions
+  
+- **.ai/README.md** - Quick reference for AI assistants
+  - Project-specific rules
+  - Bot deployment guidelines
+  
+- **.ai/project-config.json** - Machine-readable configuration
+  - Allowed/forbidden commands
+  - Production status
+  - AI assistant notes
+
+- **CRITICAL_RULES.md** - Emergency reference at root level
+  - Most visible documentation
+  - Quick "do not run locally" reminder
+  - Why local execution causes conflicts
+
+- **telegram-bot/check_bot_status.py** - Diagnostic script
+  - Checks bot status without running it
+  - Detects webhook/polling configuration
+  - Identifies conflicts between bot instances
+
+- **telegram-bot/TROUBLESHOOTING_BOT_NOT_RESPONDING.md** - Full troubleshooting guide
+  - Detailed problem analysis
+  - Step-by-step solutions
+  - Development setup with test bot
+
+- **telegram-bot/DO_NOT_RUN_LOCALLY.md** - Quick warning
+  - Brief explanation
+  - Essential commands
+  - References to full docs
+
+- **BOT_DIAGNOSIS_REPORT.md** - Historical issue documentation
+  - What happened on 2025-12-25
+  - Root cause analysis
+  - Prevention measures
+
+#### Changed
+- **telegram-bot/README.md** - Added production status and warning banner
+- **PRODUCTION_STATUS.md** - Updated troubleshooting section
+- **README.md** - Updated with production status
+
+#### Fixed
+- **Bot Conflict Issue** - Documented and prevented
+  - Created multiple layers of documentation
+  - Added AI assistant rules
+  - Established clear development workflow
+
+### 📝 Purpose
+This update ensures that AI assistants and developers never accidentally run the local Telegram bot with production token, which causes command processing conflicts.
+
+---
+
+## [2.1.0] - 2025-12-25
+
+### 🟢 Production Status Documentation
+
+#### Added
+- **PRODUCTION_STATUS.md** - Comprehensive production status documentation
+  - Current deployment status (Telegram Bot 24/7 in Yandex Cloud)
+  - Docker Compose configuration overview (15 services)
+  - CI/CD workflows status (active/disabled)
+  - Health checks and monitoring setup
+  - Troubleshooting guides
+  - Production checklist
+
+- **.github/PRODUCTION_README.md** - Quick reference guide for production
+  - Fast commands for status checks
+  - Service restart procedures
+  - Log viewing shortcuts
+  - Common troubleshooting scenarios
+
+#### Changed
+- **README.md** - Added production status badge and link to PRODUCTION_STATUS.md
+- **docker-compose.yml** - Added header comment with production configuration details
+- **.github/workflows/monitoring-health-check.yml** - Added explanatory header
+  - Documented why automatic runs are disabled
+  - Clarified manual-only execution mode
+
+#### Fixed
+- **Monitoring Health Check Workflow** - Disabled automatic execution
+  - Reason: Monitoring services run locally/in Docker, not accessible from GitHub Actions
+  - Impact: No more false-positive alerts in Telegram
+  - Status: Can still be run manually when needed
+
+### 📊 Current Production Status
+- ✅ Telegram Bot: Running 24/7 in Yandex Cloud with auto-restart
+- ✅ FastAPI Application: Ready for deployment via Docker Compose
+- ✅ All 15 services configured with `restart: unless-stopped`
+- ✅ GitHub Actions auto-deploy working for Telegram Bot
+- ⚠️ Monitoring health check disabled (false positives fixed)
+
+---
+
 ## [2.0.0] - 2025-10-30
 
 ### 🎉 Major Release - Full Production Launch (Variant B)

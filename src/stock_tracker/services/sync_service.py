@@ -178,6 +178,8 @@ class SyncService:
         """
         Insert or update product in database.
         
+        Uses SELECT FOR UPDATE to prevent race conditions during concurrent syncs.
+        
         Args:
             mp_product: Product object from marketplace client
             warehouse_data: Данные о складах из Warehouse API v1
@@ -188,11 +190,14 @@ class SyncService:
         if warehouse_data is None:
             warehouse_data = {}
             
-        # Find existing product
+        # Find existing product with row-level lock (SELECT FOR UPDATE)
+        # This prevents concurrent updates to the same product
+        # skip_locked=False: wait for lock (default behavior)
+        # nowait=True would raise error immediately if locked
         existing = self.db.query(Product).filter(
             Product.tenant_id == self.tenant.id,
             Product.marketplace_article == str(mp_product.wildberries_article)
-        ).first()
+        ).with_for_update(skip_locked=False).first()
         
         # Подготавливаем warehouse_data с заказами, распределёнными пропорционально
         wh_list = warehouse_data.get("warehouses", [])
