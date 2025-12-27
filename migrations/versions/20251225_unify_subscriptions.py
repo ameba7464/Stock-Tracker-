@@ -15,7 +15,7 @@ from datetime import datetime
 
 # revision identifiers
 revision = '20251225_unify_subscriptions'
-down_revision = '20251225_critical_improvements'  # Зависит от предыдущей миграции
+down_revision = '20251207_2140_change_subscription_to_user'
 
 
 def upgrade():
@@ -140,7 +140,7 @@ def upgrade():
     # Step 4: Создать subscriptions для всех telegram пользователей
     print("Creating subscription records for telegram users...")
     
-    result = op.execute(sa.text("""
+    op.execute(sa.text("""
         INSERT INTO subscriptions (
             id,
             user_id,
@@ -163,12 +163,10 @@ def upgrade():
           AND NOT EXISTS (
               SELECT 1 FROM subscriptions s 
               WHERE s.user_id = u.id
-          )
-        RETURNING id;
+          );
     """))
     
-    rows_inserted = result.rowcount
-    print(f"  ✓ Created {rows_inserted} subscription records for telegram users")
+    print(f"  ✓ Created subscription records for telegram users")
     
     
     # Step 5: Добавить индексы для производительности
@@ -242,7 +240,7 @@ def upgrade():
     print("✅ MIGRATION COMPLETED SUCCESSFULLY")
     print("="*60)
     print(f"\nSummary:")
-    print(f"  • Created {rows_inserted} subscription records")
+    print(f"  • Created subscription records for telegram users")
     print(f"  • All telegram users have FREE status with access")
     print(f"  • Added 6 new columns for payment metadata")
     print(f"  • Created 3 indexes for performance")
