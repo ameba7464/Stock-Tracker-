@@ -34,15 +34,15 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession):
     user = await get_user_by_telegram_id(session, telegram_id)
     
     if user:
+        # Пользователь найден - очищаем состояние регистрации
+        await state.clear()
+        
         # Проверяем доступ через unified систему
         has_access = await check_user_access(user.id, session)
-        if has_access:
-            # Пользователь имеет доступ - показываем главное меню
-            await state.clear()
-        has_api_key = bool(user.wb_api_key)
-        has_table = bool(user.google_sheet_id)
         
         # Формируем статус пользователя
+        has_api_key = bool(user.wb_api_key)
+        has_table = bool(user.google_sheet_id)
         status = UserStatus(
             has_api_key=has_api_key,
             has_table=has_table
