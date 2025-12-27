@@ -9,7 +9,6 @@ from app.database.crud import get_user_by_telegram_id
 from app.bot.states import RegistrationStates
 from app.bot.keyboards.inline import get_main_menu_keyboard
 from app.bot.utils.messages import Messages, UserStatus
-from app.services.subscription import check_user_access
 from app.utils.logger import logger
 
 router = Router()
@@ -36,9 +35,6 @@ async def cmd_start(message: Message, state: FSMContext, session: AsyncSession):
     if user:
         # Пользователь найден - очищаем состояние регистрации
         await state.clear()
-        
-        # Проверяем доступ через unified систему
-        has_access = await check_user_access(user.id, session)
         
         # Формируем статус пользователя
         has_api_key = bool(user.wb_api_key)
