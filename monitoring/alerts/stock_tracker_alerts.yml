@@ -80,14 +80,16 @@ groups:
 
       - alert: RedisHighMemoryUsage
         expr: |
-          redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+          (
+            redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+          ) and redis_memory_max_bytes > 0
         for: 5m
         labels:
           severity: warning
           service: redis
         annotations:
           summary: "Redis memory usage is high"
-          description: "Redis is using {{ $value | humanizePercentage }} of available memory"
+          description: "Redis is using {{ $value | humanizePercentage }} of available memory ({{ redis_memory_used_bytes | humanize }} / {{ redis_memory_max_bytes | humanize }})"
 
       # ========== Celery Alerts ==========
       - alert: CeleryWorkerDown

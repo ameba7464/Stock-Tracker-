@@ -41,7 +41,7 @@ services:
     image: redis:7-alpine
     container_name: stock-tracker-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     ports:
       - "6379:6379"
     volumes:
