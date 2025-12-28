@@ -21,8 +21,8 @@ engine_kwargs = {
 if "postgresql" in db_url:
     engine_kwargs.update({
         "poolclass": AsyncAdaptedQueuePool,
-        "pool_size": 10,  # Количество постоянных соединений в пуле
-        "max_overflow": 20,  # Дополнительные соединения при пиковой нагрузке
+        "pool_size": 30,  # Увеличено для параллельной обработки (было 10)
+        "max_overflow": 30,  # Увеличено для пиковой нагрузки (было 20)
         "pool_timeout": 30,  # Тайм-аут ожидания свободного соединения
         "pool_recycle": 3600,  # Переподключение каждый час (защита от idle timeout)
         "pool_pre_ping": True,  # Проверка соединения перед использованием

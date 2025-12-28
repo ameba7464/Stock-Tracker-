@@ -65,16 +65,18 @@ class AutoUpdateScheduler:
     
     async def update_all_user_tables(self):
         """
-        Обновление таблиц всех пользователей.
-        Вызывается автоматически по расписанию.
+        Параллельное обновление таблиц всех пользователей.
+        
+        Ключевое отличие: каждый пользователь имеет СВОЙ API ключ WB,
+        поэтому rate limit 3 req/min применяется ОТДЕЛЬНО к каждому.
+        Это позволяет обновлять всех пользователей ОДНОВРЕМЕННО!
         """
         logger.info("=" * 70)
-        logger.info("[UPDATE] AUTOMATIC TABLE UPDATE STARTED")
+        logger.info("[UPDATE] PARALLEL TABLE UPDATE STARTED")
         logger.info(f"[TIME] Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info("=" * 70)
         
-        updated_count = 0
-        error_count = 0
+        start_time = datetime.now()
         
         try:
             async with async_session_maker() as session:
@@ -94,35 +96,82 @@ class AutoUpdateScheduler:
                     logger.info("[INFO] No users to update")
                     return
                 
-                # Обновляем таблицы каждого пользователя
-                for i, user in enumerate(users, 1):
-                    try:
-                        logger.info(f"[{i}/{total_users}] Updating table for user {user.telegram_id} ({user.full_name})")
+                # Определяем максимальное количество одновременных обновлений
+                # Ограничиваем для защиты от перегрузки сервера и Google Sheets API
+                max_concurrent = min(20, total_users)  # До 20 параллельных обновлений
+                semaphore = asyncio.Semaphore(max_concurrent)
+                
+                logger.info(f"[PARALLEL] Will process {total_users} users with max {max_concurrent} concurrent tasks")
+                
+                async def update_single_user(user: User, index: int) -> tuple[bool, str]:
+                    """
+                    Обновление одного пользователя с контролем параллелизма.
+                    
+                    Args:
+                        user: Объект пользователя
+                        index: Номер в списке (для логирования)
+                    
+                    Returns:
+                        (success: bool, message: str)
+                    """
+                    async with semaphore:
+                        try:
+                            logger.info(
+                                f"[{index}/{total_users}] Starting update for user {user.telegram_id} "
+                                f"({user.full_name})"
+                            )
+                            
+                            # Создаем отдельную сессию для каждого пользователя
+                            # Это критично для параллельной работы!
+                            async with async_session_maker() as user_session:
+                                result = await wb_integration.update_existing_table(user, user_session)
+                                
+                                if result:
+                                    logger.info(
+                                        f"[OK] [{index}/{total_users}] User {user.telegram_id} "
+                                        f"updated successfully"
+                                    )
+                                    return True, "success"
+                                else:
+                                    logger.warning(
+                                        f"[WARNING] [{index}/{total_users}] Failed to update "
+                                        f"user {user.telegram_id}"
+                                    )
+                                    return False, "update_failed"
                         
-                        # Обновляем таблицу
-                        result = await wb_integration.update_existing_table(user, session)
-                        
-                        if result:
-                            updated_count += 1
-                            logger.info(f"[OK] [{i}/{total_users}] User {user.telegram_id} updated successfully")
-                        else:
-                            error_count += 1
-                            logger.warning(f"[WARNING] [{i}/{total_users}] Failed to update user {user.telegram_id}")
-                        
-                        # Небольшая пауза между обновлениями для снижения нагрузки
-                        if i < total_users:
-                            await asyncio.sleep(2)
-                        
-                    except Exception as e:
-                        error_count += 1
-                        logger.error(f"[ERROR] Error updating user {user.telegram_id}: {e}", exc_info=True)
-                        continue
+                        except Exception as e:
+                            logger.error(
+                                f"[ERROR] Error updating user {user.telegram_id}: {e}",
+                                exc_info=True
+                            )
+                            return False, f"exception: {type(e).__name__}"
+                
+                # Запускаем ВСЕ задачи параллельно с asyncio.gather
+                # gather автоматически управляет параллелизмом через semaphore
+                tasks = [
+                    update_single_user(user, i+1) 
+                    for i, user in enumerate(users)
+                ]
+                
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Подсчет статистики
+                updated_count = sum(1 for r in results if isinstance(r, tuple) and r[0] is True)
+                error_count = sum(1 for r in results if isinstance(r, tuple) and r[0] is False)
+                exception_count = sum(1 for r in results if isinstance(r, Exception))
+                
+                duration = (datetime.now() - start_time).total_seconds()
+                avg_time = duration / total_users if total_users > 0 else 0
                 
                 # Итоговая статистика
                 logger.info("=" * 70)
-                logger.info("[SUMMARY] UPDATE SUMMARY")
+                logger.info("[SUMMARY] PARALLEL UPDATE SUMMARY")
                 logger.info(f"[OK] Successfully updated: {updated_count}/{total_users}")
                 logger.info(f"[ERROR] Failed: {error_count}/{total_users}")
+                logger.info(f"[EXCEPTION] Exceptions: {exception_count}/{total_users}")
+                logger.info(f"[TIME] Total duration: {duration:.1f}s")
+                logger.info(f"[TIME] Average per user: {avg_time:.1f}s")
+                logger.info(f"[TIME] Speedup vs sequential: ~{total_users * 60 / duration:.1f}x")
                 logger.info(f"[TIME] Completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 logger.info("=" * 70)
                 
